@@ -206,7 +206,7 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     const recRows = buildRecPorItemRows_(order, items, receivedAt);
     const startRow = recRange.getRow() + insertIndex;
     const startCol = recRange.getColumn();
-    spreadsheet.getRange(startRow, startCol, recRows.length, recRows[0].length)
+    recRange.getSheet().getRange(startRow, startCol, recRows.length, recRows[0].length)
       .setValues(recRows);
 
     deleteLastPdf_();
