@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f7f7f7;
+        margin: 0;
+        padding: 24px;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        margin-bottom: 24px;
+        padding: 16px 20px 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+      .card-header {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .card-title {
+        font-size: 18px;
+        font-weight: bold;
+      }
+      .highlight-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        background: #f0f5ff;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-weight: 600;
+      }
+      .summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 24px;
+        font-size: 14px;
+        margin-top: 8px;
+      }
+      .details-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      .details-table th,
+      .details-table td {
+        border: 1px solid #e5e5e5;
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+      .items-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 16px;
+      }
+      .items-table th,
+      .items-table td {
+        border: 1px solid #e5e5e5;
+        padding: 8px;
+        font-size: 13px;
+      }
+      .items-table th {
+        background: #fafafa;
+        text-align: left;
+      }
+      .items-table input {
+        width: 100%;
+        padding: 6px;
+        box-sizing: border-box;
+      }
+      .actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 16px;
+      }
+      .btn {
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .btn-primary {
+        background: #2b6cb0;
+        color: #fff;
+      }
+      .btn-primary:disabled {
+        background: #9bb5d0;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: #e2e8f0;
+        color: #1a202c;
+      }
+      .status {
+        font-weight: 700;
+        color: #2f855a;
+      }
+      .status.pending {
+        color: #c05621;
+      }
+      .status.cancel {
+        color: #b83280;
+      }
+      .message {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #c53030;
+      }
+      .muted {
+        color: #4a5568;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div id="orders"></div>
+    </div>
+
+    <script>
+      const ordersContainer = document.getElementById('orders');
+
+      function init() {
+        google.script.run
+          .withSuccessHandler(renderOrders)
+          .withFailureHandler(showError)
+          .getOrdersWithItems();
+      }
+
+      function renderOrders(orders) {
+        ordersContainer.innerHTML = '';
+        if (!orders.length) {
+          ordersContainer.innerHTML = '<div class="card">Nenhum pedido encontrado.</div>';
+          return;
+        }
+
+        orders.forEach((order) => {
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.dataset.oc = order.oc;
+
+          const statusClass = order.status === 'RECEBIDO'
+            ? 'status'
+            : order.status && order.status.startsWith('CANCEL')
+              ? 'status cancel'
+              : 'status pending';
+
+          const header = `
+            <div class="card-header">
+              <div class="card-title">Confirmação de Pedido</div>
+              <div class="highlight-row">
+                <div>OC: ${escapeHtml(order.oc)}</div>
+                <div>Enviado em: ${formatDate(order.sentAt)}</div>
+                <div>Status: <span class="${statusClass}">${escapeHtml(order.status || 'PENDENTE')}</span></div>
+              </div>
+              <div class="summary">
+                <div><strong>Comprador:</strong> ${escapeHtml(order.buyerSelected || '-')}</div>
+                <div><strong>Fornecedor:</strong> ${escapeHtml(order.supplierSelected || '-')}</div>
+                <div><strong>Qtd total:</strong> ${order.qtyTotal || 0}</div>
+                <div><strong>Valor total:</strong> R$ ${formatCurrency(order.valueTotal)}</div>
+              </div>
+            </div>
+          `;
+
+          card.innerHTML = header;
+
+          if (order.buyerDetails.length || order.supplierDetails.length) {
+            const detailsTable = buildDetailsTable(order);
+            card.appendChild(detailsTable);
+          }
+
+          const table = buildItemsTable(order);
+          card.appendChild(table);
+
+          const actions = document.createElement('div');
+          actions.className = 'actions';
+
+          const message = document.createElement('div');
+          message.className = 'message';
+
+          const receivedButton = document.createElement('button');
+          receivedButton.className = 'btn btn-primary';
+          receivedButton.textContent = 'Recebido';
+          receivedButton.disabled = order.status === 'RECEBIDO' || !isOrderComplete(order);
+          receivedButton.dataset.locked = order.status === 'RECEBIDO' ? 'true' : 'false';
+          receivedButton.addEventListener('click', () => handleReceived(order, receivedButton, message));
+
+          const cancelButton = document.createElement('button');
+          cancelButton.className = 'btn btn-secondary';
+          cancelButton.textContent = 'Cancelar pedido';
+          cancelButton.addEventListener('click', () => handleCancel(order));
+
+          actions.appendChild(cancelButton);
+          actions.appendChild(receivedButton);
+
+          card.appendChild(actions);
+          card.appendChild(message);
+          ordersContainer.appendChild(card);
+        });
+      }
+
+      function buildDetailsTable(order) {
+        const wrapper = document.createElement('div');
+        const table = document.createElement('table');
+        table.className = 'details-table';
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th colspan="2">Detalhes do Comprador</th>
+              <th colspan="2">Detalhes do Fornecedor</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="2">${renderDetailsList(order.buyerDetails)}</td>
+              <td colspan="2">${renderDetailsList(order.supplierDetails)}</td>
+            </tr>
+          </tbody>
+        `;
+        wrapper.appendChild(table);
+        return wrapper;
+      }
+
+      function buildItemsTable(order) {
+        const table = document.createElement('table');
+        table.className = 'items-table';
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Item</th>
+              <th>Unidade</th>
+              <th>Quantidade</th>
+              <th>Valor Unitário</th>
+              <th>Total (R$)</th>
+              <th>Qtd recebida</th>
+              <th>Validade</th>
+              <th>Etiquetas</th>
+            </tr>
+          </thead>
+        `;
+
+        const body = document.createElement('tbody');
+        order.items.forEach((item) => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${escapeHtml(item.code || '')}</td>
+            <td>${escapeHtml(item.item || '')}</td>
+            <td>${escapeHtml(item.unit || '')}</td>
+            <td>${formatNumber(item.qty)}</td>
+            <td>${formatCurrency(item.unitPrice)}</td>
+            <td>${formatCurrency(item.total)}</td>
+          `;
+
+          const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
+          const validityInput = buildInput('date', item.validity, 'Validade');
+          const labelInput = buildInput('text', item.labels, 'Etiquetas');
+
+          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
+          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
+          labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
+
+          qtyInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+          validityInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+          labelInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+
+          row.appendChild(wrapCell(qtyInput));
+          row.appendChild(wrapCell(validityInput));
+          row.appendChild(wrapCell(labelInput));
+
+          body.appendChild(row);
+        });
+
+        table.appendChild(body);
+        return table;
+      }
+
+      function buildInput(type, value, placeholder) {
+        const input = document.createElement('input');
+        input.type = type;
+        input.placeholder = placeholder;
+        if (value !== null && value !== undefined) {
+          input.value = value;
+        }
+        return input;
+      }
+
+      function wrapCell(element) {
+        const td = document.createElement('td');
+        td.appendChild(element);
+        return td;
+      }
+
+      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput) {
+        const qtyValue = qtyInput.value === '' ? '' : Number(qtyInput.value);
+        const validityValue = validityInput.value;
+        const labelsValue = labelInput.value;
+
+        google.script.run
+          .withFailureHandler(showError)
+          .updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue);
+      }
+
+      function updateOrderButtonState(oc) {
+        const card = document.querySelector(`.card[data-oc="${cssEscape(oc)}"]`);
+        if (!card) {
+          return;
+        }
+        const inputs = card.querySelectorAll('tbody tr');
+        let complete = true;
+        inputs.forEach((row) => {
+          const fields = row.querySelectorAll('input');
+          const qty = fields[0].value;
+          const validity = fields[1].value;
+          const labels = fields[2].value;
+          if (!qty || Number.isNaN(Number(qty)) || Number(qty) <= 0 || !validity || !labels.trim()) {
+            complete = false;
+          }
+        });
+        const button = card.querySelector('.btn-primary');
+        if (!button || button.dataset.locked === 'true') {
+          return;
+        }
+        if (!button.disabled) {
+          button.disabled = !complete;
+        }
+        if (button && button.disabled && complete) {
+          button.disabled = false;
+        }
+      }
+
+      function isOrderComplete(order) {
+        return order.items.every((item) => {
+          return item.qtyReceived !== '' && !Number.isNaN(Number(item.qtyReceived)) && Number(item.qtyReceived) > 0
+            && item.validity && String(item.validity).trim() !== ''
+            && item.labels && String(item.labels).trim() !== '';
+        });
+      }
+
+      function handleReceived(order, button, message) {
+        message.textContent = '';
+        google.script.run
+          .withSuccessHandler(() => {
+            button.disabled = true;
+            button.dataset.locked = 'true';
+            const statusEl = button.closest('.card').querySelector('.status');
+            if (statusEl) {
+              statusEl.textContent = 'RECEBIDO';
+              statusEl.className = 'status';
+            }
+          })
+          .withFailureHandler((error) => {
+            message.textContent = error.message || 'Falha ao marcar como recebido.';
+          })
+          .markReceived(order.oc);
+      }
+
+      function handleCancel(order) {
+        const confirmed = confirm('Tem certeza que deseja cancelar este pedido?');
+        if (!confirmed) {
+          return;
+        }
+
+        google.script.run
+          .withSuccessHandler(() => {
+            alert('Pedido marcado para cancelamento.');
+            init();
+          })
+          .withFailureHandler(showError)
+          .cancelOrderStub(order.oc);
+      }
+
+      function renderDetailsList(list) {
+        if (!list || !list.length) {
+          return '<span class="muted">Sem detalhes</span>';
+        }
+        return `
+          <ul>
+            ${list.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+          </ul>
+        `;
+      }
+
+      function showError(error) {
+        alert(error.message || 'Erro inesperado.');
+      }
+
+      function formatCurrency(value) {
+        const numberValue = Number(value || 0);
+        return numberValue.toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      }
+
+      function formatNumber(value) {
+        return Number(value || 0).toLocaleString('pt-BR');
+      }
+
+      function formatDate(value) {
+        if (!value) {
+          return '-';
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return value;
+        }
+        return date.toLocaleString('pt-BR');
+      }
+
+      function escapeHtml(value) {
+        const text = String(value || '');
+        return text.replace(/[&<>"']/g, (char) => {
+          const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+          };
+          return map[char] || char;
+        });
+      }
+
+      function cssEscape(value) {
+        return String(value).replace(/"/g, '\\"');
+      }
+
+      window.addEventListener('load', init);
+    </script>
+  </body>
+</html>
