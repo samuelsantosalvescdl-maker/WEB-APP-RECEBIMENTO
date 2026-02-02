@@ -620,7 +620,7 @@ function readItemsByOc_(sheet) {
       unitPrice: row[6],
       total: row[7],
       qtyReceived: row[8],
-      validity: row[9],
+      validity: formatDateOnly_(row[9]),
       labels: row[10],
     });
     return acc;
@@ -711,6 +711,16 @@ function formatDateValue_(value) {
     return '';
   }
   return value;
+}
+
+function formatDateOnly_(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  }
+  if (!value) {
+    return '';
+  }
+  return String(value);
 }
 
 function jsonResponse_(payload) {
