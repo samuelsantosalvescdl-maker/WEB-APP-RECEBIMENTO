@@ -5,6 +5,8 @@ const SHEET_NAMES = {
   ITEMS: 'ITEMS',
 };
 
+const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
+
 const ORDER_HEADERS = [
   'oc',
   'status',
@@ -40,16 +42,28 @@ function doGet() {
 function doPost(e) {
   try {
     const headers = (e && e.headers) || {};
-    const apiKey = headers['X-API-KEY'] || headers['x-api-key'];
-    if (!apiKey || apiKey !== API_KEY) {
-      return jsonResponse_({ ok: false, error: 'API key inválida.' });
-    }
+    const parameterKey = (e && e.parameter && e.parameter.apiKey) || '';
 
     if (!e || !e.postData || !e.postData.contents) {
       return jsonResponse_({ ok: false, error: 'Payload vazio.' });
     }
 
-    const payload = JSON.parse(e.postData.contents);
+    let payload;
+    try {
+      payload = JSON.parse(e.postData.contents);
+    } catch (parseError) {
+      return jsonResponse_({ ok: false, error: 'Payload JSON inválido.' });
+    }
+
+    const apiKey = headers['X-API-KEY']
+      || headers['x-api-key']
+      || parameterKey
+      || (payload && payload.apiKey);
+
+    if (!apiKey || apiKey !== API_KEY) {
+      return jsonResponse_({ ok: false, error: 'API key inválida.' });
+    }
+
     const validationError = validatePayload_(payload);
     if (validationError) {
       return jsonResponse_({ ok: false, error: validationError });
@@ -175,11 +189,16 @@ function cancelOrderStub(oc) {
 }
 
 function getSpreadsheet_() {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  if (!spreadsheet) {
-    throw new Error('Nenhuma planilha ativa associada ao projeto.');
+  if (SPREADSHEET_ID && SPREADSHEET_ID !== 'YOUR_SPREADSHEET_ID_HERE') {
+    return SpreadsheetApp.openById(SPREADSHEET_ID);
   }
-  return spreadsheet;
+
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (spreadsheet) {
+    return spreadsheet;
+  }
+
+  throw new Error('Nenhuma planilha ativa associada ao projeto. Configure SPREADSHEET_ID.');
 }
 
 function getOrCreateSheet_(spreadsheet, name, headers) {
