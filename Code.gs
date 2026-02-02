@@ -5,7 +5,7 @@ const SHEET_NAMES = {
   ITEMS: 'ITEMS',
 };
 
-const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
+const SPREADSHEET_ID = 'https://docs.google.com/spreadsheets/d/1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g/edit?gid=660849428#gid=660849428';
 
 const ORDER_HEADERS = [
   'oc',
