@@ -1,11 +1,11 @@
-const API_KEY = '741852963';
+const API_KEY = 'YOUR_API_KEY_HERE';
 
 const SHEET_NAMES = {
   ORDERS: 'ORDERS',
   ITEMS: 'ITEMS',
 };
 
-const SPREADSHEET_ID = 'https://docs.google.com/spreadsheets/d/1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g/edit?gid=660849428#gid=660849428';
+const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
 
 const ORDER_HEADERS = [
   'oc',
@@ -41,7 +41,6 @@ function doGet() {
 
 function doPost(e) {
   try {
-    const headers = (e && e.headers) || {};
     const parameterKey = (e && e.parameter && e.parameter.apiKey) || '';
 
     if (!e || !e.postData || !e.postData.contents) {
@@ -55,10 +54,7 @@ function doPost(e) {
       return jsonResponse_({ ok: false, error: 'Payload JSON inválido.' });
     }
 
-    const apiKey = headers['X-API-KEY']
-      || headers['x-api-key']
-      || parameterKey
-      || (payload && payload.apiKey);
+    const apiKey = parameterKey || (payload && payload.apiKey);
 
     if (!apiKey || apiKey !== API_KEY) {
       return jsonResponse_({ ok: false, error: 'API key inválida.' });
@@ -190,7 +186,11 @@ function cancelOrderStub(oc) {
 
 function getSpreadsheet_() {
   if (SPREADSHEET_ID && SPREADSHEET_ID !== 'YOUR_SPREADSHEET_ID_HERE') {
-    return SpreadsheetApp.openById(SPREADSHEET_ID);
+    try {
+      return SpreadsheetApp.openById(SPREADSHEET_ID);
+    } catch (error) {
+      throw new Error('Falha ao abrir a planilha pelo ID configurado. Verifique SPREADSHEET_ID.');
+    }
   }
 
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
