@@ -1,11 +1,11 @@
-const API_KEY = 'YOUR_API_KEY_HERE';
+const API_KEY = '741852963';
 
 const SHEET_NAMES = {
   ORDERS: 'ORDERS',
   ITEMS: 'ITEMS',
 };
 
-const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
+const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
 
 const ORDER_HEADERS = [
   'oc',
