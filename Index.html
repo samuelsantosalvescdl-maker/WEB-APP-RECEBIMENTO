@@ -8,11 +8,54 @@
         font-family: Arial, sans-serif;
         background: #f7f7f7;
         margin: 0;
-        padding: 24px;
+        padding: 0;
       }
       .container {
         max-width: 1200px;
         margin: 0 auto;
+        padding: 24px;
+      }
+      .filter-bar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: #ffffff;
+        border-bottom: 1px solid #e2e8f0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+      .filter-content {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 12px 24px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .filter-content label {
+        font-size: 12px;
+        font-weight: 600;
+        color: #2d3748;
+      }
+      .filter-content select {
+        min-width: 220px;
+        padding: 6px 8px;
+        border-radius: 4px;
+        border: 1px solid #cbd5e0;
+        background: #fff;
+      }
+      .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .empty-state {
+        background: #fff;
+        border: 1px dashed #cbd5e0;
+        padding: 24px;
+        border-radius: 8px;
+        color: #4a5568;
+        text-align: center;
       }
       .card {
         background: #fff;
@@ -125,18 +168,98 @@
     </style>
   </head>
   <body>
+    <div class="filter-bar">
+      <div class="filter-content">
+        <div class="filter-group">
+          <label for="buyerFilter">Empresa compradora</label>
+          <select id="buyerFilter">
+            <option value="">Selecione...</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="supplierFilter">Fornecedor</label>
+          <select id="supplierFilter">
+            <option value="">Selecione...</option>
+          </select>
+        </div>
+      </div>
+    </div>
     <div class="container">
       <div id="orders"></div>
     </div>
 
     <script>
       const ordersContainer = document.getElementById('orders');
+      const buyerFilter = document.getElementById('buyerFilter');
+      const supplierFilter = document.getElementById('supplierFilter');
+      let ordersCache = [];
 
       function init() {
+        loadFilterOptions();
         google.script.run
-          .withSuccessHandler(renderOrders)
+          .withSuccessHandler((orders) => {
+            ordersCache = orders || [];
+            renderFilteredOrders();
+          })
           .withFailureHandler(showError)
           .getOrdersWithItems();
+
+        buyerFilter.addEventListener('change', renderFilteredOrders);
+        supplierFilter.addEventListener('change', renderFilteredOrders);
+      }
+
+      function loadFilterOptions() {
+        google.script.run
+          .withSuccessHandler((options) => populateSelect(buyerFilter, options))
+          .withFailureHandler(showError)
+          .getBuyerOptions();
+
+        google.script.run
+          .withSuccessHandler((options) => populateSelect(supplierFilter, options))
+          .withFailureHandler(showError)
+          .getSupplierOptions();
+      }
+
+      function populateSelect(select, options) {
+        const placeholder = select.querySelector('option[value=""]');
+        select.innerHTML = '';
+        if (placeholder) {
+          select.appendChild(placeholder);
+        } else {
+          select.appendChild(createOption_('', 'Selecione...'));
+        }
+        (options || []).forEach((value) => {
+          select.appendChild(createOption_(value, value));
+        });
+      }
+
+      function createOption_(value, label) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        return option;
+      }
+
+      function renderFilteredOrders() {
+        const buyerValue = buyerFilter.value;
+        const supplierValue = supplierFilter.value;
+        const hasFilter = buyerValue || supplierValue;
+        if (!hasFilter) {
+          renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
+          return;
+        }
+
+        const filtered = ordersCache.filter((order) => matchesFilter(order, buyerValue, supplierValue));
+        if (!filtered.length) {
+          renderEmptyState('Nenhum pedido se adequou ao filtro.');
+          return;
+        }
+
+        renderOrders(filtered);
+      }
+
+      function renderEmptyState(message) {
+        ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
       }
 
       function renderOrders(orders) {
@@ -376,7 +499,7 @@
         google.script.run
           .withSuccessHandler(() => {
             alert('Pedido marcado para cancelamento.');
-            init();
+            renderFilteredOrders();
           })
           .withFailureHandler(showError)
           .cancelOrderStub(order.oc);
@@ -436,6 +559,25 @@
 
       function cssEscape(value) {
         return String(value).replace(/"/g, '\\"');
+      }
+
+      function normalizeText(value) {
+        return String(value || '')
+          .trim()
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, ' ');
+      }
+
+      function matchesFilter(order, buyerValue, supplierValue) {
+        const buyerMatch = buyerValue
+          ? normalizeText(order.buyerSelected) === normalizeText(buyerValue)
+          : true;
+        const supplierMatch = supplierValue
+          ? normalizeText(order.supplierSelected) === normalizeText(supplierValue)
+          : true;
+        return buyerMatch && supplierMatch;
       }
 
       window.addEventListener('load', init);

@@ -117,6 +117,16 @@ function getOrdersWithItems() {
   });
 }
 
+function getBuyerOptions() {
+  const spreadsheet = getSpreadsheet_();
+  return getNamedRangeOptions_(spreadsheet, 'EMP_COMP');
+}
+
+function getSupplierOptions() {
+  const spreadsheet = getSpreadsheet_();
+  return getNamedRangeOptions_(spreadsheet, 'EMP_FORN');
+}
+
 function updateItemFields(oc, lineNo, qtyReceived, validity, labels) {
   if (!oc) {
     throw new Error('OC inválida.');
@@ -199,6 +209,16 @@ function getSpreadsheet_() {
   }
 
   throw new Error('Nenhuma planilha ativa associada ao projeto. Configure SPREADSHEET_ID.');
+}
+
+function getNamedRangeOptions_(spreadsheet, rangeName) {
+  const range = spreadsheet.getRangeByName(rangeName);
+  if (!range) {
+    throw new Error('Named range não encontrado: ' + rangeName);
+  }
+  const values = range.getValues();
+  const options = values.map((row) => row[0]).filter((value) => value !== null && value !== '');
+  return options.map((value) => String(value));
 }
 
 function getOrCreateSheet_(spreadsheet, name, headers) {
