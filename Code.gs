@@ -6,6 +6,10 @@ const SHEET_NAMES = {
 };
 
 const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
+const LABELS_FOLDER_ID = '1UzyIn1fsiVIatfgQQK-GyGIeJI4Z-AFs';
+const WEBAPP_C_URL = 'URL_DO_WEBAPP_C_EXEC_AQUI'; // placeholder
+const WEBAPP_C_API_KEY = 'SUA_API_KEY_C_AQUI'; // placeholder
+const LAST_LABELS_PDF_PROPERTY = 'LAST_LABELS_PDF_FILE_ID';
 
 const ORDER_HEADERS = [
   'oc',
@@ -148,6 +152,77 @@ function updateItemFields(oc, lineNo, qtyReceived, validity, labels) {
   return { ok: true };
 }
 
+function receiveOrder(oc, labelWidthCm, labelHeightCm) {
+  if (!oc) {
+    throw new Error('OC inválida.');
+  }
+
+  const width = parseNumber_(labelWidthCm);
+  const height = parseNumber_(labelHeightCm);
+  if (!isPositiveNumber_(width) || !isPositiveNumber_(height)) {
+    throw new Error('Informe largura e altura válidas para a etiqueta.');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const spreadsheet = getSpreadsheet_();
+    const ordersSheet = getOrCreateSheet_(spreadsheet, SHEET_NAMES.ORDERS, ORDER_HEADERS);
+    const itemsSheet = getOrCreateSheet_(spreadsheet, SHEET_NAMES.ITEMS, ITEM_HEADERS);
+
+    const orderRow = findOrderRowByOc_(ordersSheet, oc);
+    if (!orderRow) {
+      throw new Error('Pedido não encontrado.');
+    }
+
+    const order = readOrders_(ordersSheet).find((entry) => String(entry.oc) === String(oc));
+    if (!order) {
+      throw new Error('Pedido não encontrado.');
+    }
+
+    const items = readItemsByOc_(itemsSheet)[oc] || [];
+    if (!items.length) {
+      throw new Error('Itens não encontrados.');
+    }
+
+    const invalid = items.some((item) => !isItemCompleteWithLabels_(item));
+    if (invalid) {
+      throw new Error('Preencha validade, etiquetas e quantidade recebida em todas as linhas.');
+    }
+
+    const receivedAt = new Date();
+    const recRange = spreadsheet.getRangeByName('REC_POR_ITEM');
+    if (!recRange) {
+      throw new Error('Named range REC_POR_ITEM não encontrado.');
+    }
+
+    const recValues = recRange.getValues();
+    const insertIndex = findNextEmptyIndex_(recValues);
+    if (insertIndex === -1 || insertIndex + items.length > recValues.length) {
+      throw new Error('Sem espaço disponível no REC_POR_ITEM para inserir todos os itens.');
+    }
+
+    const recRows = buildRecPorItemRows_(order, items, receivedAt);
+    const startRow = recRange.getRow() + insertIndex;
+    const startCol = recRange.getColumn();
+    spreadsheet.getRange(startRow, startCol, recRows.length, recRows[0].length)
+      .setValues(recRows);
+
+    deleteLastPdf_();
+    const pdfResult = generateLabelsPdf_(oc, order, items, width, height);
+
+    sendToWebAppC_(order, items, pdfResult);
+
+    ordersSheet.getRange(orderRow, 2).setValue('RECEBIDO');
+    ordersSheet.getRange(orderRow, 10).setValue(receivedAt);
+
+    return { ok: true, oc, pdfUrl: pdfResult.pdfUrl };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function markReceived(oc) {
   if (!oc) {
     throw new Error('OC inválida.');
@@ -195,20 +270,14 @@ function cancelOrderStub(oc) {
 }
 
 function getSpreadsheet_() {
-  if (SPREADSHEET_ID && SPREADSHEET_ID !== 'YOUR_SPREADSHEET_ID_HERE') {
-    try {
-      return SpreadsheetApp.openById(SPREADSHEET_ID);
-    } catch (error) {
-      throw new Error('Falha ao abrir a planilha pelo ID configurado. Verifique SPREADSHEET_ID.');
-    }
+  if (!SPREADSHEET_ID || SPREADSHEET_ID === 'YOUR_SPREADSHEET_ID_HERE') {
+    throw new Error('SPREADSHEET_ID não configurado.');
   }
-
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  if (spreadsheet) {
-    return spreadsheet;
+  try {
+    return SpreadsheetApp.openById(SPREADSHEET_ID);
+  } catch (error) {
+    throw new Error('Falha ao abrir a planilha pelo ID configurado. Verifique SPREADSHEET_ID.');
   }
-
-  throw new Error('Nenhuma planilha ativa associada ao projeto. Configure SPREADSHEET_ID.');
 }
 
 function getNamedRangeOptions_(spreadsheet, rangeName) {
@@ -219,6 +288,188 @@ function getNamedRangeOptions_(spreadsheet, rangeName) {
   const values = range.getValues();
   const options = values.map((row) => row[0]).filter((value) => value !== null && value !== '');
   return options.map((value) => String(value));
+}
+
+function findNextEmptyIndex_(values) {
+  let lastFilled = -1;
+  for (let i = 0; i < values.length; i += 1) {
+    if (values[i][0] !== null && values[i][0] !== '') {
+      lastFilled = i;
+    }
+  }
+  return lastFilled + 1;
+}
+
+function buildRecPorItemRows_(order, items, receivedAt) {
+  const timestamp = formatDateTime_(receivedAt);
+  return items.map((item) => [
+    order.oc,
+    order.buyerSelected || '',
+    order.supplierSelected || '',
+    timestamp,
+    item.code || '',
+    item.item || '',
+    item.unit || '',
+    item.qty || 0,
+    Number(item.qtyReceived) || 0,
+    item.unitPrice || 0,
+    item.validity || '',
+  ]);
+}
+
+function deleteLastPdf_() {
+  const props = PropertiesService.getScriptProperties();
+  const lastId = props.getProperty(LAST_LABELS_PDF_PROPERTY);
+  if (!lastId) {
+    return;
+  }
+  try {
+    const file = DriveApp.getFileById(lastId);
+    file.setTrashed(true);
+  } catch (error) {
+    // Ignore missing file errors.
+  }
+  props.deleteProperty(LAST_LABELS_PDF_PROPERTY);
+}
+
+function generateLabelsPdf_(oc, order, items, labelWidthCm, labelHeightCm) {
+  const folder = DriveApp.getFolderById(LABELS_FOLDER_ID);
+  const html = buildPdfHtml_(order, items, labelWidthCm, labelHeightCm);
+  const blob = Utilities.newBlob(html, 'text/html').getAs('application/pdf');
+  const fileName = `Etiquetas_${oc}_${new Date().getTime()}.pdf`;
+  const file = folder.createFile(blob).setName(fileName);
+
+  PropertiesService.getScriptProperties().setProperty(LAST_LABELS_PDF_PROPERTY, file.getId());
+
+  return {
+    pdfUrl: file.getUrl(),
+    pdfFileId: file.getId(),
+  };
+}
+
+function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
+  const pages = items.map((item) => {
+    const labelsCount = Number(item.labels) || 0;
+    const pageCount = Math.ceil(labelsCount / 3);
+    const pagesHtml = [];
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+      const labelsHtml = [];
+      for (let slot = 0; slot < 3; slot += 1) {
+        const labelIndex = pageIndex * 3 + slot;
+        if (labelIndex < labelsCount) {
+          labelsHtml.push(`
+            <div class="label">
+              <div class="label-line"><strong>OC:</strong> ${escapeHtml_(order.oc)}</div>
+              <div class="label-line"><strong>Fornecedor:</strong> ${escapeHtml_(order.supplierSelected || '')}</div>
+              <div class="label-line"><strong>Item:</strong> ${escapeHtml_(item.item || '')}</div>
+              <div class="label-line"><strong>Código:</strong> ${escapeHtml_(item.code || '')}</div>
+              <div class="label-line"><strong>Validade:</strong> ${escapeHtml_(item.validity || '')}</div>
+            </div>
+          `);
+        } else {
+          labelsHtml.push('<div class="label label-empty"></div>');
+        }
+      }
+      pagesHtml.push(`
+        <div class="page">
+          ${labelsHtml.join('')}
+        </div>
+      `);
+    }
+    return pagesHtml.join('');
+  });
+
+  return `
+    <html>
+      <head>
+        <style>
+          @page { margin: 0.5cm; }
+          body { margin: 0; font-family: Arial, sans-serif; }
+          .page {
+            width: 100%;
+            page-break-after: always;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5cm;
+          }
+          .label {
+            width: ${labelWidthCm}cm;
+            height: ${labelHeightCm}cm;
+            border: 1px solid #000;
+            padding: 0.2cm;
+            box-sizing: border-box;
+            font-size: 10px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+          }
+          .label-empty {
+            border-color: transparent;
+          }
+          .label-line {
+            line-height: 1.2;
+          }
+        </style>
+      </head>
+      <body>
+        ${pages.join('')}
+      </body>
+    </html>
+  `;
+}
+
+function sendToWebAppC_(order, items, pdfResult) {
+  const payload = {
+    apiVersion: 1,
+    oc: order.oc,
+    sentAt: new Date().toISOString(),
+    buyerSelected: order.buyerSelected || '',
+    supplierSelected: order.supplierSelected || '',
+    items: items.map((item) => ({
+      lineNo: item.lineNo,
+      code: item.code || '',
+      item: item.item || '',
+      unit: item.unit || '',
+      qty: item.qty || 0,
+      unitPrice: item.unitPrice || 0,
+      total: item.total || 0,
+      qtyReceived: Number(item.qtyReceived) || 0,
+      validity: item.validity || '',
+      labels: Number(item.labels) || 0,
+    })),
+    pdfFileId: pdfResult.pdfFileId,
+    pdfUrl: pdfResult.pdfUrl,
+  };
+
+  const response = UrlFetchApp.fetch(WEBAPP_C_URL, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'X-API-KEY': WEBAPP_C_API_KEY,
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+
+  const status = response.getResponseCode();
+  if (status >= 400) {
+    throw new Error('Falha ao enviar para o WebApp C.');
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(response.getContentText());
+  } catch (error) {
+    return;
+  }
+
+  if (parsed && parsed.ok === false) {
+    throw new Error('WebApp C retornou erro ao receber o pedido.');
+  }
+}
+
+function formatDateTime_(value) {
+  return Utilities.formatDate(value, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
 }
 
 function getOrCreateSheet_(spreadsheet, name, headers) {
@@ -395,6 +646,50 @@ function isItemComplete_(item) {
 
 function isNumber_(value) {
   return typeof value === 'number' && !Number.isNaN(value);
+}
+
+function parseNumber_(value) {
+  if (value === null || value === undefined || value === '') {
+    return NaN;
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  const normalized = String(value).replace(',', '.');
+  return Number(normalized);
+}
+
+function isPositiveNumber_(value) {
+  return typeof value === 'number' && !Number.isNaN(value) && value > 0;
+}
+
+function isPositiveInteger_(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+function isValidDateString_(value) {
+  return typeof value === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(value.trim());
+}
+
+function isItemCompleteWithLabels_(item) {
+  const qtyReceived = parseNumber_(item.qtyReceived);
+  const labels = parseNumber_(item.labels);
+  return isPositiveNumber_(qtyReceived)
+    && isPositiveInteger_(labels)
+    && isValidDateString_(String(item.validity || ''));
+}
+
+function escapeHtml_(value) {
+  return String(value || '').replace(/[&<>"']/g, (char) => {
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return map[char] || char;
+  });
 }
 
 function parseJsonSafe_(value) {
