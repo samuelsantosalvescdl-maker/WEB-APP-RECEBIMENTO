@@ -233,10 +233,12 @@
     <div id="labelsModal" class="modal-backdrop">
       <div class="modal">
         <h3>Etiquetas geradas</h3>
-        <p><a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a></p>
+        <p>
+          Acessar PDF:
+          <a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a>
+        </p>
         <div class="modal-actions">
-          <button id="printPdf" class="btn btn-secondary" type="button">Imprimir</button>
-          <button id="closeModal" class="btn btn-primary" type="button">Fechar</button>
+          <button id="closeModal" class="btn btn-primary" type="button">Ok</button>
         </div>
       </div>
     </div>
@@ -271,12 +273,14 @@
             closeLabelsModal();
           }
         });
-        printPdf.addEventListener('click', () => {
-          if (!pdfLink.href || pdfLink.href === '#') {
-            return;
-          }
-          window.open(pdfLink.href, '_blank', 'noopener');
-        });
+        if (printPdf) {
+          printPdf.addEventListener('click', () => {
+            if (!pdfLink.href || pdfLink.href === '#') {
+              return;
+            }
+            window.open(pdfLink.href, '_blank', 'noopener');
+          });
+        }
       }
 
       function loadFilterOptions() {
