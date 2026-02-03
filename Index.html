@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f7f7f7;
+        margin: 0;
+        padding: 0;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .filter-bar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: #ffffff;
+        border-bottom: 1px solid #e2e8f0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+      .filter-content {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 12px 24px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .filter-content label {
+        font-size: 12px;
+        font-weight: 600;
+        color: #2d3748;
+      }
+      .filter-content select {
+        min-width: 220px;
+        padding: 6px 8px;
+        border-radius: 4px;
+        border: 1px solid #cbd5e0;
+        background: #fff;
+      }
+      .filter-content input[type="text"] {
+        width: 140px;
+        padding: 6px 8px;
+        border-radius: 4px;
+        border: 1px solid #cbd5e0;
+      }
+      .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .empty-state {
+        background: #fff;
+        border: 1px dashed #cbd5e0;
+        padding: 24px;
+        border-radius: 8px;
+        color: #4a5568;
+        text-align: center;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        margin-bottom: 24px;
+        padding: 16px 20px 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+      .card-header {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .card-title {
+        font-size: 18px;
+        font-weight: bold;
+      }
+      .highlight-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        background: #f0f5ff;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-weight: 600;
+      }
+      .summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 24px;
+        font-size: 14px;
+        margin-top: 8px;
+      }
+      .details-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      .details-table th,
+      .details-table td {
+        border: 1px solid #e5e5e5;
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+      .items-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 16px;
+      }
+      .items-table th,
+      .items-table td {
+        border: 1px solid #e5e5e5;
+        padding: 8px;
+        font-size: 13px;
+      }
+      .items-table th {
+        background: #fafafa;
+        text-align: left;
+      }
+      .items-table input {
+        width: 100%;
+        padding: 6px;
+        box-sizing: border-box;
+      }
+      .actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 16px;
+      }
+      .btn {
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .btn-primary {
+        background: #2b6cb0;
+        color: #fff;
+      }
+      .btn-primary:disabled {
+        background: #9bb5d0;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: #e2e8f0;
+        color: #1a202c;
+      }
+      .status {
+        font-weight: 700;
+        color: #2f855a;
+      }
+      .status.pending {
+        color: #c05621;
+      }
+      .status.cancel {
+        color: #b83280;
+      }
+      .message {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #c53030;
+      }
+      .muted {
+        color: #4a5568;
+      }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+      }
+      .modal {
+        background: #fff;
+        border-radius: 8px;
+        padding: 20px;
+        width: 100%;
+        max-width: 420px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      }
+      .modal h3 {
+        margin-top: 0;
+      }
+      .modal-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 16px;
+      }
+      .modal a {
+        color: #2b6cb0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="filter-bar">
+      <div class="filter-content">
+        <div class="filter-group">
+          <label for="buyerFilter">Empresa compradora</label>
+          <select id="buyerFilter">
+            <option value="">Selecione...</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="supplierFilter">Fornecedor</label>
+          <select id="supplierFilter">
+            <option value="">Selecione...</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="labelWidthCm">Largura etiqueta (cm)</label>
+          <input id="labelWidthCm" type="text" placeholder="Ex: 5,0">
+        </div>
+        <div class="filter-group">
+          <label for="labelHeightCm">Altura etiqueta (cm)</label>
+          <input id="labelHeightCm" type="text" placeholder="Ex: 3,0">
+        </div>
+      </div>
+    </div>
+    <div class="container">
+      <div id="orders"></div>
+    </div>
+    <div id="labelsModal" class="modal-backdrop">
+      <div class="modal">
+        <h3>Etiquetas geradas</h3>
+        <p>
+          Acessar PDF:
+          <a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a>
+        </p>
+        <div class="modal-actions">
+          <button id="closeModal" class="btn btn-primary" type="button">Ok</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const ordersContainer = document.getElementById('orders');
+      const buyerFilter = document.getElementById('buyerFilter');
+      const supplierFilter = document.getElementById('supplierFilter');
+      const labelWidthInput = document.getElementById('labelWidthCm');
+      const labelHeightInput = document.getElementById('labelHeightCm');
+      const labelsModal = document.getElementById('labelsModal');
+      const pdfLink = document.getElementById('pdfLink');
+      const printPdf = document.getElementById('printPdf');
+      const closeModal = document.getElementById('closeModal');
+      let ordersCache = [];
+
+      function init() {
+        loadFilterOptions();
+        google.script.run
+          .withSuccessHandler((orders) => {
+            ordersCache = orders || [];
+            renderFilteredOrders();
+          })
+          .withFailureHandler(showError)
+          .getOrdersWithItems();
+
+        buyerFilter.addEventListener('change', renderFilteredOrders);
+        supplierFilter.addEventListener('change', renderFilteredOrders);
+        closeModal.addEventListener('click', closeLabelsModal);
+        labelsModal.addEventListener('click', (event) => {
+          if (event.target === labelsModal) {
+            closeLabelsModal();
+          }
+        });
+        if (printPdf) {
+          printPdf.addEventListener('click', () => {
+            if (!pdfLink.href || pdfLink.href === '#') {
+              return;
+            }
+            window.open(pdfLink.href, '_blank', 'noopener');
+          });
+        }
+      }
+
+      function loadFilterOptions() {
+        google.script.run
+          .withSuccessHandler((options) => populateSelect(buyerFilter, options))
+          .withFailureHandler(showError)
+          .getBuyerOptions();
+
+        google.script.run
+          .withSuccessHandler((options) => populateSelect(supplierFilter, options))
+          .withFailureHandler(showError)
+          .getSupplierOptions();
+      }
+
+      function populateSelect(select, options) {
+        const placeholder = select.querySelector('option[value=""]');
+        select.innerHTML = '';
+        if (placeholder) {
+          select.appendChild(placeholder);
+        } else {
+          select.appendChild(createOption_('', 'Selecione...'));
+        }
+        (options || []).forEach((value) => {
+          select.appendChild(createOption_(value, value));
+        });
+      }
+
+      function createOption_(value, label) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        return option;
+      }
+
+      function renderFilteredOrders() {
+        const buyerValue = buyerFilter.value;
+        const supplierValue = supplierFilter.value;
+        const hasFilter = buyerValue || supplierValue;
+        if (!hasFilter) {
+          renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
+          return;
+        }
+
+        const filtered = ordersCache
+          .filter((order) => order.status !== 'RECEBIDO')
+          .filter((order) => matchesFilter(order, buyerValue, supplierValue));
+        if (!filtered.length) {
+          renderEmptyState('Nenhum pedido se adequou ao filtro.');
+          return;
+        }
+
+        renderOrders(filtered);
+      }
+
+      function renderEmptyState(message) {
+        ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+      }
+
+      function renderOrders(orders) {
+        ordersContainer.innerHTML = '';
+        if (!orders.length) {
+          ordersContainer.innerHTML = '<div class="card">Nenhum pedido encontrado.</div>';
+          return;
+        }
+
+        orders.forEach((order) => {
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.dataset.oc = order.oc;
+
+          const statusClass = order.status === 'RECEBIDO'
+            ? 'status'
+            : order.status && order.status.startsWith('CANCEL')
+              ? 'status cancel'
+              : 'status pending';
+
+          const header = `
+            <div class="card-header">
+              <div class="card-title">Confirmação de Pedido</div>
+              <div class="highlight-row">
+                <div>OC: ${escapeHtml(order.oc)}</div>
+                <div>Enviado em: ${formatDate(order.sentAt)}</div>
+                <div>Status: <span class="${statusClass}">${escapeHtml(order.status || 'PENDENTE')}</span></div>
+              </div>
+              <div class="summary">
+                <div><strong>Comprador:</strong> ${escapeHtml(order.buyerSelected || '-')}</div>
+                <div><strong>Fornecedor:</strong> ${escapeHtml(order.supplierSelected || '-')}</div>
+                <div><strong>Qtd total:</strong> ${order.qtyTotal || 0}</div>
+                <div><strong>Valor total:</strong> R$ ${formatCurrency(order.valueTotal)}</div>
+              </div>
+            </div>
+          `;
+
+          card.innerHTML = header;
+
+          if (order.buyerDetails.length || order.supplierDetails.length) {
+            const detailsTable = buildDetailsTable(order);
+            card.appendChild(detailsTable);
+          }
+
+          const table = buildItemsTable(order);
+          card.appendChild(table);
+
+          const actions = document.createElement('div');
+          actions.className = 'actions';
+
+          const message = document.createElement('div');
+          message.className = 'message';
+
+          const receivedButton = document.createElement('button');
+          receivedButton.className = 'btn btn-primary';
+          receivedButton.textContent = 'Recebido';
+          receivedButton.disabled = order.status === 'RECEBIDO' || !isOrderComplete(order);
+          receivedButton.dataset.locked = order.status === 'RECEBIDO' ? 'true' : 'false';
+          receivedButton.addEventListener('click', () => handleReceived(order, receivedButton, message));
+
+          const cancelButton = document.createElement('button');
+          cancelButton.className = 'btn btn-secondary';
+          cancelButton.textContent = 'Cancelar pedido';
+          cancelButton.addEventListener('click', () => handleCancel(order));
+
+          actions.appendChild(cancelButton);
+          actions.appendChild(receivedButton);
+
+          card.appendChild(actions);
+          card.appendChild(message);
+          ordersContainer.appendChild(card);
+        });
+      }
+
+      function buildDetailsTable(order) {
+        const wrapper = document.createElement('div');
+        const table = document.createElement('table');
+        table.className = 'details-table';
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th colspan="2">Detalhes do Comprador</th>
+              <th colspan="2">Detalhes do Fornecedor</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="2">${renderDetailsList(order.buyerDetails)}</td>
+              <td colspan="2">${renderDetailsList(order.supplierDetails)}</td>
+            </tr>
+          </tbody>
+        `;
+        wrapper.appendChild(table);
+        return wrapper;
+      }
+
+      function buildItemsTable(order) {
+        const table = document.createElement('table');
+        table.className = 'items-table';
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Item</th>
+              <th>Unidade</th>
+              <th>Quantidade</th>
+              <th>Valor Unitário</th>
+              <th>Total (R$)</th>
+              <th>Qtd recebida</th>
+              <th>Validade</th>
+              <th>Etiquetas</th>
+            </tr>
+          </thead>
+        `;
+
+        const body = document.createElement('tbody');
+        order.items.forEach((item) => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${escapeHtml(item.code || '')}</td>
+            <td>${escapeHtml(item.item || '')}</td>
+            <td>${escapeHtml(item.unit || '')}</td>
+            <td>${formatNumber(item.qty)}</td>
+            <td>${formatCurrency(item.unitPrice)}</td>
+            <td>${formatCurrency(item.total)}</td>
+          `;
+
+          const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
+          const validityInput = buildInput('text', item.validity, 'Validade dd/MM/yyyy');
+          const labelInput = buildInput('number', item.labels, 'Etiquetas');
+
+          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
+          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
+          labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
+
+          qtyInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+          validityInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+          labelInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+
+          row.appendChild(wrapCell(qtyInput));
+          row.appendChild(wrapCell(validityInput));
+          row.appendChild(wrapCell(labelInput));
+
+          body.appendChild(row);
+        });
+
+        table.appendChild(body);
+        return table;
+      }
+
+      function buildInput(type, value, placeholder) {
+        const input = document.createElement('input');
+        input.type = type;
+        input.placeholder = placeholder;
+        if (value !== null && value !== undefined) {
+          input.value = value;
+        }
+        return input;
+      }
+
+      function wrapCell(element) {
+        const td = document.createElement('td');
+        td.appendChild(element);
+        return td;
+      }
+
+      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput) {
+        const qtyValue = qtyInput.value === '' ? '' : Number(qtyInput.value);
+        const validityValue = validityInput.value;
+        const labelsValue = labelInput.value === '' ? '' : Number(labelInput.value);
+
+        google.script.run
+          .withFailureHandler(showError)
+          .updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue);
+      }
+
+      function updateOrderButtonState(oc) {
+        const card = document.querySelector(`.card[data-oc="${cssEscape(oc)}"]`);
+        if (!card) {
+          return;
+        }
+        const inputs = card.querySelectorAll('tbody tr');
+        let complete = true;
+        inputs.forEach((row) => {
+          const fields = row.querySelectorAll('input');
+          const qty = fields[0].value;
+          const validity = fields[1].value;
+          const labels = fields[2].value;
+          if (!isPositiveNumber(qty) || !isValidDate(validity) || !isPositiveInteger(labels)) {
+            complete = false;
+          }
+        });
+        const button = card.querySelector('.btn-primary');
+        if (!button || button.dataset.locked === 'true') {
+          return;
+        }
+        if (!button.disabled) {
+          button.disabled = !complete;
+        }
+        if (button && button.disabled && complete) {
+          button.disabled = false;
+        }
+      }
+
+      function isOrderComplete(order) {
+        return order.items.every((item) => {
+          return isPositiveNumber(item.qtyReceived)
+            && isValidDate(item.validity)
+            && isPositiveInteger(item.labels);
+        });
+      }
+
+      function handleReceived(order, button, message) {
+        message.textContent = '';
+        const labelWidth = parseNumber(labelWidthInput.value);
+        const labelHeight = parseNumber(labelHeightInput.value);
+        if (!isPositiveNumber(labelWidth) || !isPositiveNumber(labelHeight)) {
+          message.textContent = 'Informe largura e altura válidas para as etiquetas.';
+          return;
+        }
+        const printWindow = window.open('about:blank', '_blank');
+        if (printWindow) {
+          printWindow.document.write('<p>Gerando PDF...</p>');
+        }
+        button.disabled = true;
+        button.textContent = 'Processando...';
+
+        google.script.run
+          .withSuccessHandler((response) => {
+            button.dataset.locked = 'true';
+            removeOrderFromCache(order.oc);
+            removeOrderCard(order.oc);
+            const fileId = response && response.pdfFileId ? response.pdfFileId : '';
+            const printUrl = buildPrintUrl(fileId);
+            if (printWindow && printUrl) {
+              printWindow.location.href = printUrl;
+            } else if (response && response.pdfUrl) {
+              window.open(response.pdfUrl, '_blank', 'noopener');
+            }
+            openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
+          })
+          .withFailureHandler((error) => {
+            button.disabled = false;
+            button.textContent = 'Recebido';
+            message.textContent = error.message || 'Falha ao marcar como recebido.';
+            if (printWindow) {
+              printWindow.close();
+            }
+          })
+          .receiveOrder(order.oc, labelWidth, labelHeight);
+      }
+
+      function handleCancel(order) {
+        const confirmed = confirm('Tem certeza que deseja cancelar este pedido?');
+        if (!confirmed) {
+          return;
+        }
+
+        google.script.run
+          .withSuccessHandler(() => {
+            alert('Pedido marcado para cancelamento.');
+            renderFilteredOrders();
+          })
+          .withFailureHandler(showError)
+          .cancelOrderStub(order.oc);
+      }
+
+      function renderDetailsList(list) {
+        if (!list || !list.length) {
+          return '<span class="muted">Sem detalhes</span>';
+        }
+        return `
+          <ul>
+            ${list.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+          </ul>
+        `;
+      }
+
+      function showError(error) {
+        alert(error.message || 'Erro inesperado.');
+      }
+
+      function parseNumber(value) {
+        if (value === null || value === undefined || value === '') {
+          return NaN;
+        }
+        return Number(String(value).replace(',', '.'));
+      }
+
+      function isPositiveNumber(value) {
+        const numberValue = Number(value);
+        return !Number.isNaN(numberValue) && numberValue > 0;
+      }
+
+      function isPositiveInteger(value) {
+        const numberValue = Number(value);
+        return Number.isInteger(numberValue) && numberValue > 0;
+      }
+
+      function isValidDate(value) {
+        if (!value) {
+          return false;
+        }
+        return /^\d{2}\/\d{2}\/\d{4}$/.test(String(value).trim());
+      }
+
+      function openLabelsModal(url) {
+        pdfLink.href = url || '#';
+        labelsModal.style.display = 'flex';
+      }
+
+      function closeLabelsModal() {
+        labelsModal.style.display = 'none';
+      }
+
+      function removeOrderCard(oc) {
+        const card = document.querySelector(`.card[data-oc="${cssEscape(oc)}"]`);
+        if (card) {
+          card.remove();
+        }
+        if (!ordersContainer.children.length) {
+          renderFilteredOrders();
+        }
+      }
+
+      function removeOrderFromCache(oc) {
+        ordersCache = ordersCache.filter((order) => order.oc !== oc);
+      }
+
+      function buildPrintUrl(fileId) {
+        if (!fileId) {
+          return '';
+        }
+        const baseUrl = window.location.href.split('?')[0];
+        return `${baseUrl}?view=print&fileId=${encodeURIComponent(fileId)}`;
+      }
+
+      function formatCurrency(value) {
+        const numberValue = Number(value || 0);
+        return numberValue.toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      }
+
+      function formatNumber(value) {
+        return Number(value || 0).toLocaleString('pt-BR');
+      }
+
+      function formatDate(value) {
+        if (!value) {
+          return '-';
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return value;
+        }
+        return date.toLocaleString('pt-BR');
+      }
+
+      function escapeHtml(value) {
+        const text = String(value || '');
+        return text.replace(/[&<>"']/g, (char) => {
+          const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+          };
+          return map[char] || char;
+        });
+      }
+
+      function cssEscape(value) {
+        return String(value).replace(/"/g, '\\"');
+      }
+
+      function normalizeText(value) {
+        return String(value || '')
+          .trim()
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, ' ');
+      }
+
+      function matchesFilter(order, buyerValue, supplierValue) {
+        const buyerMatch = buyerValue
+          ? normalizeText(order.buyerSelected) === normalizeText(buyerValue)
+          : true;
+        const supplierMatch = supplierValue
+          ? normalizeText(order.supplierSelected) === normalizeText(supplierValue)
+          : true;
+        return buyerMatch && supplierMatch;
+      }
+
+      window.addEventListener('load', init);
+    </script>
+  </body>
+</html>
