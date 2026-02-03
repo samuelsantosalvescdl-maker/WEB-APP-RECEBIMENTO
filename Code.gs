@@ -440,6 +440,7 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
 function sendToWebAppC_(order, items, pdfResult) {
   const payload = {
     apiVersion: 1,
+    apiKey: WEBAPP_C_API_KEY,
     oc: order.oc,
     sentAt: new Date().toISOString(),
     buyerSelected: order.buyerSelected || '',
@@ -460,7 +461,11 @@ function sendToWebAppC_(order, items, pdfResult) {
     pdfUrl: pdfResult.pdfUrl,
   };
 
-  const response = UrlFetchApp.fetch(WEBAPP_C_URL, {
+  const url = WEBAPP_C_URL
+    + (WEBAPP_C_URL.includes('?') ? '&' : '?')
+    + 'apiKey=' + encodeURIComponent(WEBAPP_C_API_KEY);
+
+  const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
     headers: {
@@ -471,19 +476,28 @@ function sendToWebAppC_(order, items, pdfResult) {
   });
 
   const status = response.getResponseCode();
-  if (status >= 400) {
-    throw new Error('Falha ao enviar para o WebApp C.');
+  const text = response.getContentText();
+  let parsed = null;
+
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    parsed = null;
   }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(response.getContentText());
-  } catch (error) {
+  if (parsed && (parsed.ok === true || parsed.duplicate === true)) {
     return;
   }
 
   if (parsed && parsed.ok === false) {
-    throw new Error('WebApp C retornou erro ao receber o pedido.');
+    throw new Error(parsed.error || 'Erro ao enviar para o WebApp C.');
+  }
+
+  if (status >= 400) {
+    if (parsed && parsed.error) {
+      throw new Error(parsed.error);
+    }
+    throw new Error(`HTTP ${status} ao enviar para o WebApp C.`);
   }
 }
 
