@@ -7,8 +7,8 @@ const SHEET_NAMES = {
 
 const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
 const LABELS_FOLDER_ID = '1UzyIn1fsiVIatfgQQK-GyGIeJI4Z-AFs';
-const WEBAPP_C_URL = 'URL_DO_WEBAPP_C_EXEC_AQUI'; // placeholder
-const WEBAPP_C_API_KEY = 'SUA_API_KEY_C_AQUI'; // placeholder
+const WEBAPP_C_URL = 'https://script.google.com/macros/s/AKfycbyohvLNZUxc1Kdyg0N5dr4lxgA9pXMbzEUwy2dLWF_P5IHfeEpyPnkjnKGAvOQfk1Y3/exec';
+const WEBAPP_C_API_KEY = '369258147';
 const LAST_LABELS_PDF_PROPERTY = 'LAST_LABELS_PDF_FILE_ID';
 
 const ORDER_HEADERS = [

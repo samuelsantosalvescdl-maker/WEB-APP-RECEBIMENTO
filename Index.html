@@ -569,6 +569,8 @@
             const printUrl = buildPrintUrl(fileId);
             if (printWindow && printUrl) {
               printWindow.location.href = printUrl;
+            } else if (response && response.pdfUrl) {
+              window.open(response.pdfUrl, '_blank', 'noopener');
             }
             openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
           })
