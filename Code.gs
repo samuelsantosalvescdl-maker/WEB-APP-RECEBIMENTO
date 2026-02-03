@@ -1,8 +1,8 @@
 const API_KEY = '741852963';
 
 const SHEET_NAMES = {
-  ORDERS: 'ORDERS',
-  ITEMS: 'ITEMS',
+  ORDERS: 'CONT_FIN',
+  ITEMS: 'REC_POR_ITEM',
 };
 
 const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
