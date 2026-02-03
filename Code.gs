@@ -38,7 +38,24 @@ const ITEM_HEADERS = [
   'labels',
 ];
 
-function doGet() {
+function doGet(e) {
+  const view = e && e.parameter && e.parameter.view;
+  if (view === 'print') {
+    return HtmlService.createHtmlOutputFromFile('Print')
+      .setTitle('Impressão de Etiquetas');
+  }
+  if (view === 'pdf') {
+    const fileId = e && e.parameter && e.parameter.fileId;
+    if (!fileId) {
+      return ContentService.createTextOutput('Arquivo não informado.');
+    }
+    try {
+      const file = DriveApp.getFileById(fileId);
+      return file.getBlob().setContentType('application/pdf');
+    } catch (error) {
+      return ContentService.createTextOutput('PDF não encontrado.');
+    }
+  }
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Recebimento de Pedidos');
 }
@@ -217,7 +234,7 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     ordersSheet.getRange(orderRow, 2).setValue('RECEBIDO');
     ordersSheet.getRange(orderRow, 10).setValue(receivedAt);
 
-    return { ok: true, oc, pdfUrl: pdfResult.pdfUrl };
+    return { ok: true, oc, pdfUrl: pdfResult.pdfUrl, pdfFileId: pdfResult.pdfFileId };
   } finally {
     lock.releaseLock();
   }
@@ -348,49 +365,51 @@ function generateLabelsPdf_(oc, order, items, labelWidthCm, labelHeightCm) {
 }
 
 function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
-  const pages = items.map((item) => {
-    const labelsCount = Number(item.labels) || 0;
-    const pageCount = Math.ceil(labelsCount / 3);
-    const pagesHtml = [];
-    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
-      const labelsHtml = [];
-      for (let slot = 0; slot < 3; slot += 1) {
-        const labelIndex = pageIndex * 3 + slot;
-        if (labelIndex < labelsCount) {
-          labelsHtml.push(`
-            <div class="label">
-              <div class="label-line"><strong>OC:</strong> ${escapeHtml_(order.oc)}</div>
-              <div class="label-line"><strong>Fornecedor:</strong> ${escapeHtml_(order.supplierSelected || '')}</div>
-              <div class="label-line"><strong>Item:</strong> ${escapeHtml_(item.item || '')}</div>
-              <div class="label-line"><strong>Código:</strong> ${escapeHtml_(item.code || '')}</div>
-              <div class="label-line"><strong>Validade:</strong> ${escapeHtml_(item.validity || '')}</div>
-            </div>
-          `);
-        } else {
-          labelsHtml.push('<div class="label label-empty"></div>');
-        }
-      }
-      pagesHtml.push(`
-        <div class="page">
-          ${labelsHtml.join('')}
-        </div>
-      `);
+  const gapCm = 0.2;
+  const pageWidth = (3 * labelWidthCm) + (2 * gapCm);
+  const pageHeight = labelHeightCm;
+  const labels = buildLabelsQueue_(order, items);
+  const pages = [];
+  for (let i = 0; i < labels.length; i += 3) {
+    const slice = labels.slice(i, i + 3);
+    while (slice.length < 3) {
+      slice.push(null);
     }
-    return pagesHtml.join('');
-  });
+    const labelsHtml = slice.map((entry) => {
+      if (!entry) {
+        return '<div class="label label-empty"></div>';
+      }
+      return `
+        <div class="label">
+          <div class="label-line"><strong>OC:</strong> ${escapeHtml_(entry.oc)}</div>
+          <div class="label-line"><strong>Fornecedor:</strong> ${escapeHtml_(entry.supplier)}</div>
+          <div class="label-line"><strong>Item:</strong> ${escapeHtml_(entry.item)}</div>
+          <div class="label-line"><strong>Código:</strong> ${escapeHtml_(entry.code)}</div>
+          <div class="label-line"><strong>Validade:</strong> ${escapeHtml_(entry.validity)}</div>
+        </div>
+      `;
+    });
+    pages.push(`
+      <div class="page">
+        ${labelsHtml.join('')}
+      </div>
+    `);
+  }
 
   return `
     <html>
       <head>
         <style>
-          @page { margin: 0.5cm; }
+          @page { size: ${pageWidth}cm ${pageHeight}cm; margin: 0; }
           body { margin: 0; font-family: Arial, sans-serif; }
           .page {
-            width: 100%;
+            width: ${pageWidth}cm;
+            height: ${pageHeight}cm;
             page-break-after: always;
-            display: flex;
-            flex-direction: column;
-            gap: 0.5cm;
+            display: grid;
+            grid-template-columns: repeat(3, ${labelWidthCm}cm);
+            column-gap: ${gapCm}cm;
+            align-items: stretch;
           }
           .label {
             width: ${labelWidthCm}cm;
@@ -470,6 +489,23 @@ function sendToWebAppC_(order, items, pdfResult) {
 
 function formatDateTime_(value) {
   return Utilities.formatDate(value, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
+}
+
+function buildLabelsQueue_(order, items) {
+  const queue = [];
+  items.forEach((item) => {
+    const labelsCount = Number(item.labels) || 0;
+    for (let i = 0; i < labelsCount; i += 1) {
+      queue.push({
+        oc: order.oc,
+        supplier: order.supplierSelected || '',
+        item: item.item || '',
+        code: item.code || '',
+        validity: item.validity || '',
+      });
+    }
+  });
+  return queue;
 }
 
 function getOrCreateSheet_(spreadsheet, name, headers) {

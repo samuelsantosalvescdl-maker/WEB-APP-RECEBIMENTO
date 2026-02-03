@@ -275,12 +275,7 @@
           if (!pdfLink.href || pdfLink.href === '#') {
             return;
           }
-          const win = window.open(pdfLink.href, '_blank', 'noopener');
-          if (win) {
-            win.addEventListener('load', () => {
-              win.print();
-            });
-          }
+          window.open(pdfLink.href, '_blank', 'noopener');
         });
       }
 
@@ -558,6 +553,10 @@
           message.textContent = 'Informe largura e altura válidas para as etiquetas.';
           return;
         }
+        const printWindow = window.open('about:blank', '_blank');
+        if (printWindow) {
+          printWindow.document.write('<p>Gerando PDF...</p>');
+        }
         button.disabled = true;
         button.textContent = 'Processando...';
 
@@ -566,12 +565,20 @@
             button.dataset.locked = 'true';
             removeOrderFromCache(order.oc);
             removeOrderCard(order.oc);
+            const fileId = response && response.pdfFileId ? response.pdfFileId : '';
+            const printUrl = buildPrintUrl(fileId);
+            if (printWindow && printUrl) {
+              printWindow.location.href = printUrl;
+            }
             openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
           })
           .withFailureHandler((error) => {
             button.disabled = false;
             button.textContent = 'Recebido';
             message.textContent = error.message || 'Falha ao marcar como recebido.';
+            if (printWindow) {
+              printWindow.close();
+            }
           })
           .receiveOrder(order.oc, labelWidth, labelHeight);
       }
@@ -651,6 +658,14 @@
 
       function removeOrderFromCache(oc) {
         ordersCache = ordersCache.filter((order) => order.oc !== oc);
+      }
+
+      function buildPrintUrl(fileId) {
+        if (!fileId) {
+          return '';
+        }
+        const baseUrl = window.location.href.split('?')[0];
+        return `${baseUrl}?view=print&fileId=${encodeURIComponent(fileId)}`;
       }
 
       function formatCurrency(value) {
