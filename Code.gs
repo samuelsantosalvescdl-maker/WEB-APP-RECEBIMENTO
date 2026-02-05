@@ -174,14 +174,14 @@ function getSupplierOptions() {
   return getNamedRangeOptions_(spreadsheet, 'EMP_FORN');
 }
 
-function updateItemFields(oc, lineNo, qtyReceived, validity, labels) {
+function updateItemFields(oc, lineNo, qtyReceived, validity, labels, rowIndex) {
   if (!oc) {
     throw new Error('OC inválida.');
   }
 
   const spreadsheet = getSpreadsheet_();
   const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
-  const row = findItemRowInRange_(itemsRange, oc, lineNo);
+  const row = rowIndex || findItemRowInRange_(itemsRange, oc, lineNo);
   if (!row) {
     throw new Error('Item não encontrado.');
   }
@@ -647,7 +647,7 @@ function readOrdersFromRange_(range) {
 
 function readItemsByOcFromRange_(range) {
   const values = range.getValues();
-  return values.reduce((acc, row) => {
+  return values.reduce((acc, row, index) => {
     const oc = row[ITEM_RANGE_MAP.oc];
     if (!oc) {
       return acc;
@@ -658,6 +658,7 @@ function readItemsByOcFromRange_(range) {
     acc[oc].push({
       oc,
       lineNo: row[ITEM_RANGE_MAP.lineNo],
+      rowIndex: range.getRow() + index,
       code: row[ITEM_RANGE_MAP.code],
       item: row[ITEM_RANGE_MAP.item],
       unit: row[ITEM_RANGE_MAP.unit],

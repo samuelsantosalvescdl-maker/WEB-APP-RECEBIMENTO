@@ -468,9 +468,9 @@
           const validityInput = buildInput('text', item.validity, 'Validade dd/MM/yyyy');
           const labelInput = buildInput('number', item.labels, 'Etiquetas');
 
-          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
-          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
-          labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput));
+          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
+          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
+          labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
 
           qtyInput.addEventListener('input', () => updateOrderButtonState(order.oc));
           validityInput.addEventListener('input', () => updateOrderButtonState(order.oc));
@@ -503,14 +503,14 @@
         return td;
       }
 
-      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput) {
+      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) {
         const qtyValue = qtyInput.value === '' ? '' : Number(qtyInput.value);
         const validityValue = validityInput.value;
         const labelsValue = labelInput.value === '' ? '' : Number(labelInput.value);
 
         google.script.run
           .withFailureHandler(showError)
-          .updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue);
+          .updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue, rowIndex);
       }
 
       function updateOrderButtonState(oc) {
