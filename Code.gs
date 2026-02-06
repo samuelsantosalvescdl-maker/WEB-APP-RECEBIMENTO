@@ -166,8 +166,13 @@ function getOrdersWithItems() {
   const itemsByOc = readItemsByOcFromRange_(itemsRange);
 
   const enriched = orders.map((order) => {
+    const items = itemsByOc[order.oc] || [];
+    const fallbackBuyer = order.buyerSelected || (items[0] && items[0].buyerSelected) || '';
+    const fallbackSupplier = order.supplierSelected || (items[0] && items[0].supplierSelected) || '';
     return Object.assign({}, order, {
-      items: itemsByOc[order.oc] || [],
+      buyerSelected: fallbackBuyer,
+      supplierSelected: fallbackSupplier,
+      items,
     });
   });
 
