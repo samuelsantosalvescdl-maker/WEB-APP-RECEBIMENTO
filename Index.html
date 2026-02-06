@@ -612,7 +612,7 @@
           `;
 
           const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
-          const validityInput = buildInput('text', item.validity, 'Validade dd/MM/yyyy');
+          const validityInput = buildInput('text', normalizeDateInput(item.validity), 'Validade dd/MM/yyyy');
           const labelInput = buildInput('number', item.labels, 'Etiquetas');
 
           qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
@@ -783,8 +783,41 @@
         if (!value) {
           return false;
         }
-        const normalized = String(value).trim().replace(/[-.]/g, '/');
-        return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized);
+        if (value instanceof Date) {
+          return !Number.isNaN(value.getTime());
+        }
+        const normalized = String(value).trim();
+        if (!normalized) {
+          return false;
+        }
+        const normalizedSlash = normalized.replace(/[-.]/g, '/');
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(normalizedSlash)) {
+          return true;
+        }
+        const parsed = new Date(normalized);
+        return !Number.isNaN(parsed.getTime());
+      }
+
+      function normalizeDateInput(value) {
+        if (!value) {
+          return '';
+        }
+        if (value instanceof Date) {
+          return value.toLocaleDateString('pt-BR');
+        }
+        const text = String(value).trim();
+        if (!text) {
+          return '';
+        }
+        const normalized = text.replace(/[-.]/g, '/');
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(normalized)) {
+          return normalized;
+        }
+        const parsed = new Date(text);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed.toLocaleDateString('pt-BR');
+        }
+        return text;
       }
 
       function openLabelsModal(url) {
