@@ -262,6 +262,13 @@
       </div>
     </div>
     <div class="container">
+      <div id="debugPanel" class="empty-state" style="margin-bottom: 16px;">
+        <strong>DEBUG</strong>
+        <div>Carregados: <span id="debugLoaded">0</span></div>
+        <div>Pendentes: <span id="debugPending">0</span></div>
+        <div>No filtro: <span id="debugFiltered">0</span></div>
+        <div>Buyer filtro: <span id="debugBuyer">-</span> | Supplier filtro: <span id="debugSupplier">-</span></div>
+      </div>
       <div id="orders"></div>
     </div>
     <div id="labelsModal" class="modal-backdrop">
@@ -287,17 +294,16 @@
       const pdfLink = document.getElementById('pdfLink');
       const printPdf = document.getElementById('printPdf');
       const closeModal = document.getElementById('closeModal');
+      const debugLoaded = document.getElementById('debugLoaded');
+      const debugPending = document.getElementById('debugPending');
+      const debugFiltered = document.getElementById('debugFiltered');
+      const debugBuyer = document.getElementById('debugBuyer');
+      const debugSupplier = document.getElementById('debugSupplier');
       let ordersCache = [];
 
       function init() {
         loadFilterOptions();
-        google.script.run
-          .withSuccessHandler((orders) => {
-            ordersCache = orders || [];
-            renderFilteredOrders();
-          })
-          .withFailureHandler(showError)
-          .getOrdersWithItems();
+        refreshOrders();
 
         buyerFilter.addEventListener('change', renderFilteredOrders);
         supplierFilter.addEventListener('change', renderFilteredOrders);
@@ -315,6 +321,8 @@
             window.open(pdfLink.href, '_blank', 'noopener');
           });
         }
+
+        setInterval(refreshOrders, 15000);
       }
 
       function loadFilterOptions() {
@@ -353,7 +361,12 @@
         const buyerValue = buyerFilter.value;
         const supplierValue = supplierFilter.value;
         const hasFilter = buyerValue || supplierValue;
+        const pendingOrders = ordersCache.filter((order) => {
+          const status = normalizeText(order.status);
+          return !status || status.startsWith('PENDENTE');
+        });
         if (!hasFilter) {
+          updateDebugPanel(pendingOrders.length, 0, buyerValue, supplierValue);
           renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
           return;
         }
@@ -361,9 +374,10 @@
         const filtered = ordersCache
           .filter((order) => {
             const status = normalizeText(order.status);
-            return !status || status === 'PENDENTE';
+            return !status || status.startsWith('PENDENTE');
           })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
+        updateDebugPanel(pendingOrders.length, filtered.length, buyerValue, supplierValue);
         if (!filtered.length) {
           renderEmptyState('Nenhum pedido se adequou ao filtro.');
           return;
@@ -374,6 +388,27 @@
 
       function renderEmptyState(message) {
         ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+      }
+
+      function updateDebugPanel(pendingCount, filteredCount, buyerValue, supplierValue) {
+        if (!debugLoaded) {
+          return;
+        }
+        debugLoaded.textContent = ordersCache.length;
+        debugPending.textContent = pendingCount;
+        debugFiltered.textContent = filteredCount;
+        debugBuyer.textContent = buyerValue || '-';
+        debugSupplier.textContent = supplierValue || '-';
+      }
+
+      function refreshOrders() {
+        google.script.run
+          .withSuccessHandler((orders) => {
+            ordersCache = orders || [];
+            renderFilteredOrders();
+          })
+          .withFailureHandler(showError)
+          .getOrdersWithItems();
       }
 
       function renderOrders(orders) {

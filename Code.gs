@@ -124,6 +124,7 @@ function doPost(e) {
 
     const validationError = validatePayload_(payload);
     if (validationError) {
+      Logger.log(`Validação falhou: ${validationError}`);
       return jsonResponse_({ ok: false, error: validationError });
     }
 
@@ -131,21 +132,22 @@ function doPost(e) {
     lock.waitLock(10000);
 
     try {
+      const normalized = normalizeBuyerSupplierFromPayload_(payload);
       const spreadsheet = getSpreadsheet_();
       const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
       const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
 
       const existingRow = findOrderRowByOcInRange_(ordersRange, payload.oc);
       if (existingRow) {
+        Logger.log(`Pedido duplicado ignorado: ${payload.oc}`);
         return jsonResponse_({ ok: true, duplicate: true });
       }
 
-      const orderRow = buildOrderRow_(payload);
+      Logger.log(`Recebendo pedido: oc=${payload.oc} itens=${payload.items.length} comprador=${normalized.buyerSelected} fornecedor=${normalized.supplierSelected}`);
+      const orderRow = buildOrderRow_(payload, normalized);
       writeOrderRowsToRange_(ordersRange, [orderRow]);
 
-      const buyer = payload.buyer || {};
-      const supplier = payload.supplier || {};
-      const itemRows = buildItemRows_(payload.oc, payload.items, buyer.selected || '', supplier.selected || '');
+      const itemRows = buildItemRows_(payload.oc, payload.items, normalized.buyerSelected, normalized.supplierSelected);
       if (itemRows.length) {
         writeItemRowsToRange_(itemsRange, itemRows);
       }
@@ -693,7 +695,7 @@ function validatePayload_(payload) {
   }
 
   const invalidItem = payload.items.find((item) => {
-    return !isNumber_(item.qty) || !isNumber_(item.unitPrice) || !isNumber_(item.total);
+    return !isNumeric_(item.qty) || !isNumeric_(item.unitPrice) || !isNumeric_(item.total);
   });
   if (invalidItem) {
     return 'Campos numéricos inválidos nos itens.';
@@ -702,24 +704,22 @@ function validatePayload_(payload) {
   return '';
 }
 
-function buildOrderRow_(payload) {
+function buildOrderRow_(payload, normalized) {
   const totals = payload.totals || {};
-  const buyer = payload.buyer || {};
-  const supplier = payload.supplier || {};
   const sentAt = payload.sentAt ? new Date(payload.sentAt) : new Date();
 
   return {
     oc: payload.oc,
     status: 'PENDENTE',
     sentAt,
-    buyerSelected: buyer.selected || '',
-    supplierSelected: supplier.selected || '',
+    buyerSelected: normalized.buyerSelected || '',
+    supplierSelected: normalized.supplierSelected || '',
     qtyTotal: totals.qtyTotal || 0,
     valueTotal: totals.valueTotal || 0,
     nf: '',
     nfFrete: '',
-    buyerDetailsJson: JSON.stringify(buyer.details || []),
-    supplierDetailsJson: JSON.stringify(supplier.details || []),
+    buyerDetailsJson: JSON.stringify(normalized.buyerDetails || []),
+    supplierDetailsJson: JSON.stringify(normalized.supplierDetails || []),
     receivedAt: '',
   };
 }
@@ -975,6 +975,14 @@ function isNumber_(value) {
   return typeof value === 'number' && !Number.isNaN(value);
 }
 
+function isNumeric_(value) {
+  if (value === null || value === undefined || value === '') {
+    return false;
+  }
+  const numberValue = Number(String(value).replace(',', '.'));
+  return !Number.isNaN(numberValue);
+}
+
 function parseNumber_(value) {
   if (value === null || value === undefined || value === '') {
     return NaN;
@@ -1061,4 +1069,30 @@ function jsonResponse_(payload) {
   return ContentService
     .createTextOutput(JSON.stringify(payload))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function normalizeBuyerSupplierFromPayload_(payload) {
+  const buyerSelected =
+    (payload && payload.buyer && payload.buyer.selected)
+    || (payload && payload.buyerSelected)
+    || '';
+  const supplierSelected =
+    (payload && payload.supplier && payload.supplier.selected)
+    || (payload && payload.supplierSelected)
+    || '';
+  const buyerDetails =
+    (payload && payload.buyer && payload.buyer.details)
+    || (payload && payload.buyerDetails)
+    || [];
+  const supplierDetails =
+    (payload && payload.supplier && payload.supplier.details)
+    || (payload && payload.supplierDetails)
+    || [];
+
+  return {
+    buyerSelected: String(buyerSelected || '').trim(),
+    supplierSelected: String(supplierSelected || '').trim(),
+    buyerDetails: Array.isArray(buyerDetails) ? buyerDetails : [],
+    supplierDetails: Array.isArray(supplierDetails) ? supplierDetails : [],
+  };
 }
