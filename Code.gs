@@ -585,9 +585,6 @@ function sendToWebAppC_(order, items, pdfResult) {
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    headers: {
-      'X-API-KEY': WEBAPP_C_API_KEY,
-    },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true,
   });
@@ -607,15 +604,52 @@ function sendToWebAppC_(order, items, pdfResult) {
   }
 
   if (parsed && parsed.ok === false) {
-    throw new Error(parsed.error || 'Erro ao enviar para o WebApp C.');
+    throw new Error(buildWebAppCError_(status, parsed.error, text));
   }
 
   if (status >= 400) {
     if (parsed && parsed.error) {
-      throw new Error(parsed.error);
+      throw new Error(buildWebAppCError_(status, parsed.error, text));
     }
-    throw new Error(`HTTP ${status} ao enviar para o WebApp C.`);
+    throw new Error(buildWebAppCError_(status, null, text));
   }
+
+  if (!parsed) {
+    throw new Error(buildWebAppCError_(status, null, text));
+  }
+}
+
+function testWebAppCConnection_() {
+  const url = WEBAPP_C_URL
+    + (WEBAPP_C_URL.includes('?') ? '&' : '?')
+    + 'ping=1';
+  const response = UrlFetchApp.fetch(url, {
+    method: 'get',
+    muteHttpExceptions: true,
+  });
+  const status = response.getResponseCode();
+  const text = response.getContentText();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    parsed = null;
+  }
+  if (!parsed || parsed.ok !== true) {
+    throw new Error(buildWebAppCError_(status, parsed && parsed.error, text));
+  }
+  const info = {
+    scriptId: parsed.scriptId || '',
+    expectedKeyLast3: parsed.expectedKeyLast3 || '',
+  };
+  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
+  return info;
+}
+
+function buildWebAppCError_(status, message, bodyText) {
+  const snippet = String(bodyText || '').slice(0, 200);
+  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
+  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
 }
 
 function formatDateTime_(value) {
