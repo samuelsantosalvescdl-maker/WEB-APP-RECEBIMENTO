@@ -361,7 +361,7 @@
         const filtered = ordersCache
           .filter((order) => {
             const status = String(order.status || '').trim().toLowerCase();
-            return status !== 'recebido' && status !== 'cancelado';
+            return status === 'pendente';
           })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
         if (!filtered.length) {
@@ -903,10 +903,10 @@
 
       function matchesFilter(order, buyerValue, supplierValue) {
         const buyerMatch = buyerValue
-          ? matchesNormalized_(order.buyerSelected, buyerValue)
+          ? matchesAnyField_(buyerValue, order.buyerSelected, order.buyerDetails)
           : true;
         const supplierMatch = supplierValue
-          ? matchesNormalized_(order.supplierSelected, supplierValue)
+          ? matchesAnyField_(supplierValue, order.supplierSelected, order.supplierDetails)
           : true;
         return buyerMatch && supplierMatch;
       }
@@ -920,6 +920,16 @@
         return orderText === filterText
           || orderText.includes(filterText)
           || filterText.includes(orderText);
+      }
+
+      function matchesAnyField_(filterValue, primaryValue, detailsList) {
+        if (matchesNormalized_(primaryValue, filterValue)) {
+          return true;
+        }
+        if (!detailsList || !detailsList.length) {
+          return false;
+        }
+        return detailsList.some((entry) => matchesNormalized_(entry, filterValue));
       }
 
       window.addEventListener('load', init);

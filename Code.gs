@@ -169,8 +169,16 @@ function getOrdersWithItems() {
 
   const enriched = orders.map((order) => {
     const items = itemsByOc[order.oc] || [];
-    const fallbackBuyer = order.buyerSelected || (items[0] && items[0].buyerSelected) || '';
-    const fallbackSupplier = order.supplierSelected || (items[0] && items[0].supplierSelected) || '';
+    const buyerDetailFallback = order.buyerDetails && order.buyerDetails.length ? order.buyerDetails[0] : '';
+    const supplierDetailFallback = order.supplierDetails && order.supplierDetails.length ? order.supplierDetails[0] : '';
+    const fallbackBuyer = order.buyerSelected
+      || (items[0] && items[0].buyerSelected)
+      || buyerDetailFallback
+      || '';
+    const fallbackSupplier = order.supplierSelected
+      || (items[0] && items[0].supplierSelected)
+      || supplierDetailFallback
+      || '';
     return Object.assign({}, order, {
       buyerSelected: fallbackBuyer,
       supplierSelected: fallbackSupplier,
