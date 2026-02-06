@@ -361,7 +361,7 @@
         const filtered = ordersCache
           .filter((order) => {
             const status = String(order.status || '').trim().toLowerCase();
-            return status !== 'recebido' && status !== 'cancelado';
+            return status === 'pendente';
           })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
         if (!filtered.length) {
