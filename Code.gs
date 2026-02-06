@@ -20,6 +20,8 @@ const ORDER_COLUMN_LETTERS = {
   receivedAt: 'O',
 };
 
+const LEGACY_ORDER_DETAIL_COLUMNS = ['M', 'N'];
+
 const ITEM_COLUMN_LETTERS = {
   oc: 'A',
   lineNo: 'M',
@@ -778,11 +780,12 @@ function writeOrderRowsToRange_(range, orderRows) {
   }
   const values = range.getValues();
   const indexMap = getOrderIndexMap_(range);
+  const legacyIndexes = getLegacyOrderDetailIndexes_(range, indexMap);
   const insertIndex = findNextEmptyIndex_(values, indexMap.oc);
   if (insertIndex === -1 || insertIndex + orderRows.length > values.length) {
     throw new Error('Sem espaço disponível no intervalo CONT_FIN para inserir pedidos.');
   }
-  const output = orderRows.map((row) => mapOrderRowToRange_(row, values[0].length, indexMap));
+  const output = orderRows.map((row) => mapOrderRowToRange_(row, values[0].length, indexMap, legacyIndexes));
   const sheet = range.getSheet();
   const startRow = range.getRow() + insertIndex;
   const startCol = range.getColumn();
@@ -839,7 +842,7 @@ function markItemsCancelledInRange_(range, oc) {
   });
 }
 
-function mapOrderRowToRange_(row, totalCols, indexMap) {
+function mapOrderRowToRange_(row, totalCols, indexMap, legacyIndexes) {
   const output = Array(totalCols).fill('');
   output[indexMap.oc] = row.oc;
   output[indexMap.status] = row.status;
@@ -853,7 +856,34 @@ function mapOrderRowToRange_(row, totalCols, indexMap) {
   output[indexMap.buyerDetailsJson] = row.buyerDetailsJson;
   output[indexMap.supplierDetailsJson] = row.supplierDetailsJson;
   output[indexMap.receivedAt] = row.receivedAt;
+  clearLegacyOrderDetailColumns_(output, legacyIndexes);
   return output;
+}
+
+function getLegacyOrderDetailIndexes_(range, indexMap) {
+  const usedIndexes = new Set(Object.values(indexMap));
+  const legacyIndexes = [];
+  LEGACY_ORDER_DETAIL_COLUMNS.forEach((letter) => {
+    const absCol = colLetterToAbsIndex_(letter);
+    try {
+      const rel0 = absToRelIndex0_(absCol, range);
+      if (!usedIndexes.has(rel0)) {
+        legacyIndexes.push(rel0);
+      }
+    } catch (error) {
+      // ignore columns outside the named range
+    }
+  });
+  return legacyIndexes;
+}
+
+function clearLegacyOrderDetailColumns_(output, legacyIndexes) {
+  if (!legacyIndexes || !legacyIndexes.length) {
+    return;
+  }
+  legacyIndexes.forEach((index) => {
+    output[index] = '';
+  });
 }
 
 function mapItemRowToRange_(row, totalCols, indexMap) {
