@@ -870,12 +870,23 @@
 
       function matchesFilter(order, buyerValue, supplierValue) {
         const buyerMatch = buyerValue
-          ? normalizeText(order.buyerSelected) === normalizeText(buyerValue)
+          ? matchesNormalized_(order.buyerSelected, buyerValue)
           : true;
         const supplierMatch = supplierValue
-          ? normalizeText(order.supplierSelected) === normalizeText(supplierValue)
+          ? matchesNormalized_(order.supplierSelected, supplierValue)
           : true;
         return buyerMatch && supplierMatch;
+      }
+
+      function matchesNormalized_(orderValue, filterValue) {
+        const orderText = normalizeText(orderValue);
+        const filterText = normalizeText(filterValue);
+        if (!orderText || !filterText) {
+          return false;
+        }
+        return orderText === filterText
+          || orderText.includes(filterText)
+          || filterText.includes(orderText);
       }
 
       window.addEventListener('load', init);
