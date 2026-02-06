@@ -5,34 +5,38 @@ const SHEET_NAMES = {
   ITEMS: 'REC_POR_ITEM',
 };
 
-const ORDER_RANGE_MAP = {
-  oc: 0, // A
-  status: 6, // G
-  sentAt: 7, // H
-  buyerSelected: 1, // B
-  supplierSelected: 3, // D
-  qtyTotal: 4, // E
-  valueTotal: 5, // F
-  buyerDetailsJson: 8, // I
-  supplierDetailsJson: 9, // J
-  receivedAt: 2, // C
+const ORDER_COLUMN_LETTERS = {
+  oc: 'A',
+  status: 'G',
+  sentAt: 'H',
+  buyerSelected: 'B',
+  supplierSelected: 'D',
+  qtyTotal: 'E',
+  valueTotal: 'F',
+  nf: 'K',
+  nfFrete: 'L',
+  buyerDetailsJson: 'I',
+  supplierDetailsJson: 'J',
+  receivedAt: 'O',
 };
 
-const ITEM_RANGE_MAP = {
-  oc: 0, // A
-  lineNo: 1, // B
-  code: 2, // C
-  item: 3, // D
-  unit: 4, // E
-  qty: 5, // F
-  unitPrice: 6, // G
-  total: 7, // H
-  qtyReceived: 8, // I
-  validity: 9, // J
-  labels: 10, // K
-  buyerSelected: 11, // L
-  supplierSelected: 12, // M
-  receivedAt: 13, // N
+const LEGACY_ORDER_DETAIL_COLUMNS = ['M', 'N'];
+
+const ITEM_COLUMN_LETTERS = {
+  oc: 'A',
+  lineNo: 'M',
+  code: 'E',
+  item: 'F',
+  unit: 'G',
+  qty: 'H',
+  unitPrice: 'J',
+  total: 'L',
+  qtyReceived: 'I',
+  validity: 'K',
+  labels: 'N',
+  buyerSelected: 'B',
+  supplierSelected: 'C',
+  receivedAt: 'D',
 };
 
 const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
@@ -49,6 +53,8 @@ const ORDER_HEADERS = [
   'supplierSelected',
   'qtyTotal',
   'valueTotal',
+  'nf',
+  'nfFrete',
   'buyerDetailsJson',
   'supplierDetailsJson',
   'receivedAt',
@@ -66,6 +72,9 @@ const ITEM_HEADERS = [
   'qtyReceived',
   'validity',
   'labels',
+  'buyerSelected',
+  'supplierSelected',
+  'receivedAt',
 ];
 
 function doGet(e) {
@@ -106,8 +115,10 @@ function doPost(e) {
     }
 
     const apiKey = parameterKey || (payload && payload.apiKey);
+    const apiKeyNormalized = String(apiKey || '').trim();
+    const expectedKey = String(API_KEY || '').trim();
 
-    if (!apiKey || apiKey !== API_KEY) {
+    if (!apiKeyNormalized || apiKeyNormalized !== expectedKey) {
       return jsonResponse_({ ok: false, error: 'API key inválida.' });
     }
 
@@ -157,8 +168,13 @@ function getOrdersWithItems() {
   const itemsByOc = readItemsByOcFromRange_(itemsRange);
 
   const enriched = orders.map((order) => {
+    const items = itemsByOc[order.oc] || [];
+    const fallbackBuyer = order.buyerSelected || (items[0] && items[0].buyerSelected) || '';
+    const fallbackSupplier = order.supplierSelected || (items[0] && items[0].supplierSelected) || '';
     return Object.assign({}, order, {
-      items: itemsByOc[order.oc] || [],
+      buyerSelected: fallbackBuyer,
+      supplierSelected: fallbackSupplier,
+      items,
     });
   });
 
@@ -191,11 +207,33 @@ function updateItemFields(oc, lineNo, qtyReceived, validity, labels, rowIndex) {
     throw new Error('Item não encontrado.');
   }
 
+  const indexMap = getItemIndexMap_(itemsRange);
   const startCol = itemsRange.getColumn();
   const sheet = itemsRange.getSheet();
-  sheet.getRange(row, startCol + ITEM_RANGE_MAP.qtyReceived, 1, 1).setValue(qtyReceived);
-  sheet.getRange(row, startCol + ITEM_RANGE_MAP.validity, 1, 1).setValue(validity);
-  sheet.getRange(row, startCol + ITEM_RANGE_MAP.labels, 1, 1).setValue(labels);
+  sheet.getRange(row, startCol + indexMap.qtyReceived, 1, 1).setValue(qtyReceived);
+  sheet.getRange(row, startCol + indexMap.validity, 1, 1).setValue(validity);
+  sheet.getRange(row, startCol + indexMap.labels, 1, 1).setValue(labels);
+
+  return { ok: true };
+}
+
+function updateOrderHeaderFields(oc, nfValue, nfFreteValue) {
+  if (!oc) {
+    throw new Error('OC inválida.');
+  }
+
+  const spreadsheet = getSpreadsheet_();
+  const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+  const row = findOrderRowByOcInRange_(ordersRange, oc);
+  if (!row) {
+    throw new Error('Pedido não encontrado.');
+  }
+
+  const indexMap = getOrderIndexMap_(ordersRange);
+  const sheet = ordersRange.getSheet();
+  const startCol = ordersRange.getColumn();
+  sheet.getRange(row, startCol + indexMap.nf, 1, 1).setValue(nfValue || '');
+  sheet.getRange(row, startCol + indexMap.nfFrete, 1, 1).setValue(nfFreteValue || '');
 
   return { ok: true };
 }
@@ -228,6 +266,9 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     if (!order) {
       throw new Error('Pedido não encontrado.');
     }
+    if (String(order.status || '').trim().toLowerCase() === 'cancelado') {
+      throw new Error('Pedido cancelado.');
+    }
 
     const items = readItemsByOcFromRange_(itemsRange)[oc] || [];
     if (!items.length) {
@@ -250,8 +291,9 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
 
     const ordersSheet = ordersRange.getSheet();
     const ordersStartCol = ordersRange.getColumn();
-    ordersSheet.getRange(orderRow, ordersStartCol + ORDER_RANGE_MAP.status).setValue('RECEBIDO');
-    ordersSheet.getRange(orderRow, ordersStartCol + ORDER_RANGE_MAP.receivedAt).setValue(receivedAt);
+    const orderIndexMap = getOrderIndexMap_(ordersRange);
+    ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
+    ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
 
     return { ok: true, oc, pdfUrl: pdfResult.pdfUrl, pdfFileId: pdfResult.pdfFileId };
   } finally {
@@ -285,8 +327,9 @@ function markReceived(oc) {
 
   const ordersSheet = ordersRange.getSheet();
   const ordersStartCol = ordersRange.getColumn();
-  ordersSheet.getRange(row, ordersStartCol + ORDER_RANGE_MAP.status).setValue('RECEBIDO');
-  ordersSheet.getRange(row, ordersStartCol + ORDER_RANGE_MAP.receivedAt).setValue(new Date());
+  const orderIndexMap = getOrderIndexMap_(ordersRange);
+  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
+  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.receivedAt).setValue(new Date());
 
   return { ok: true };
 }
@@ -298,6 +341,7 @@ function cancelOrderStub(oc) {
 
   const spreadsheet = getSpreadsheet_();
   const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+  const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
   const row = findOrderRowByOcInRange_(ordersRange, oc);
   if (!row) {
     throw new Error('Pedido não encontrado.');
@@ -305,7 +349,10 @@ function cancelOrderStub(oc) {
 
   const ordersSheet = ordersRange.getSheet();
   const ordersStartCol = ordersRange.getColumn();
-  ordersSheet.getRange(row, ordersStartCol + ORDER_RANGE_MAP.status).setValue('CANCEL_PENDENTE');
+  const orderIndexMap = getOrderIndexMap_(ordersRange);
+  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue('cancelado');
+
+  markItemsCancelledInRange_(itemsRange, oc);
   return { ok: true };
 }
 
@@ -335,6 +382,44 @@ function getNamedRangeOptions_(spreadsheet, rangeName) {
   return options.map((value) => String(value));
 }
 
+function getOrderIndexMap_(range) {
+  return buildRangeIndexMap_(range, ORDER_COLUMN_LETTERS);
+}
+
+function getItemIndexMap_(range) {
+  return buildRangeIndexMap_(range, ITEM_COLUMN_LETTERS);
+}
+
+function buildRangeIndexMap_(range, columnLettersByField) {
+  const map = {};
+  Object.keys(columnLettersByField).forEach((field) => {
+    const absCol = colLetterToAbsIndex_(columnLettersByField[field]);
+    map[field] = absToRelIndex0_(absCol, range);
+  });
+  return map;
+}
+
+function colLetterToAbsIndex_(letter) {
+  const normalized = String(letter || '').trim().toUpperCase();
+  let result = 0;
+  for (let i = 0; i < normalized.length; i += 1) {
+    const code = normalized.charCodeAt(i);
+    if (code < 65 || code > 90) {
+      throw new Error(`Coluna inválida: ${letter}`);
+    }
+    result = (result * 26) + (code - 64);
+  }
+  return result;
+}
+
+function absToRelIndex0_(absCol, range) {
+  const rel0 = absCol - range.getColumn();
+  if (rel0 < 0 || rel0 >= range.getNumColumns()) {
+    throw new Error('Coluna fora do intervalo do named range.');
+  }
+  return rel0;
+}
+
 function findNextEmptyIndex_(values, colIndex) {
   const column = Number.isInteger(colIndex) ? colIndex : 0;
   for (let i = 0; i < values.length; i += 1) {
@@ -348,22 +433,22 @@ function findNextEmptyIndex_(values, colIndex) {
 
 function buildRecPorItemRows_(order, items, receivedAt) {
   const timestamp = formatDateTime_(receivedAt);
-  return items.map((item) => [
-    order.oc,
-    item.lineNo || '',
-    item.code || '',
-    item.item || '',
-    item.unit || '',
-    item.qty || 0,
-    item.unitPrice || 0,
-    item.total || 0,
-    Number(item.qtyReceived) || 0,
-    item.validity || '',
-    Number(item.labels) || 0,
-    order.buyerSelected || '',
-    order.supplierSelected || '',
-    timestamp,
-  ]);
+  return items.map((item) => ({
+    oc: order.oc,
+    lineNo: item.lineNo || '',
+    code: item.code || '',
+    item: item.item || '',
+    unit: item.unit || '',
+    qty: item.qty || 0,
+    unitPrice: item.unitPrice || 0,
+    total: item.total || 0,
+    qtyReceived: Number(item.qtyReceived) || 0,
+    validity: item.validity || '',
+    labels: Number(item.labels) || 0,
+    buyerSelected: order.buyerSelected || '',
+    supplierSelected: order.supplierSelected || '',
+    receivedAt: timestamp,
+  }));
 }
 
 function deleteLastPdf_() {
@@ -518,7 +603,7 @@ function sendToWebAppC_(order, items, pdfResult) {
   }
 
   if (parsed && (parsed.ok === true || parsed.duplicate === true)) {
-    return;
+    return { ok: true, duplicate: parsed.duplicate === true };
   }
 
   if (parsed && parsed.ok === false) {
@@ -581,45 +666,46 @@ function buildOrderRow_(payload) {
   const supplier = payload.supplier || {};
   const sentAt = payload.sentAt ? new Date(payload.sentAt) : new Date();
 
-  return [
-    payload.oc,
-    'PENDENTE',
+  return {
+    oc: payload.oc,
+    status: 'PENDENTE',
     sentAt,
-    buyer.selected || '',
-    supplier.selected || '',
-    totals.qtyTotal || 0,
-    totals.valueTotal || 0,
-    JSON.stringify(buyer.details || []),
-    JSON.stringify(supplier.details || []),
-    '',
-  ];
+    buyerSelected: buyer.selected || '',
+    supplierSelected: supplier.selected || '',
+    qtyTotal: totals.qtyTotal || 0,
+    valueTotal: totals.valueTotal || 0,
+    nf: '',
+    nfFrete: '',
+    buyerDetailsJson: JSON.stringify(buyer.details || []),
+    supplierDetailsJson: JSON.stringify(supplier.details || []),
+    receivedAt: '',
+  };
 }
 
 function buildItemRows_(oc, items, buyerSelected, supplierSelected) {
-  return items.map((item, index) => {
-    return [
-      oc,
-      index + 1,
-      item.code || '',
-      item.item || '',
-      item.unit || '',
-      item.qty || 0,
-      item.unitPrice || 0,
-      item.total || 0,
-      '',
-      '',
-      '',
-      buyerSelected || '',
-      supplierSelected || '',
-      '',
-    ];
-  });
+  return items.map((item, index) => ({
+    oc,
+    lineNo: index + 1,
+    code: item.code || '',
+    item: item.item || '',
+    unit: item.unit || '',
+    qty: item.qty || 0,
+    unitPrice: item.unitPrice || 0,
+    total: item.total || 0,
+    qtyReceived: '',
+    validity: '',
+    labels: '',
+    buyerSelected: buyerSelected || '',
+    supplierSelected: supplierSelected || '',
+    receivedAt: '',
+  }));
 }
 
 function findOrderRowByOcInRange_(range, oc) {
   const values = range.getValues();
+  const indexMap = getOrderIndexMap_(range);
   for (let i = 0; i < values.length; i += 1) {
-    if (String(values[i][ORDER_RANGE_MAP.oc]) === String(oc)) {
+    if (String(values[i][indexMap.oc]) === String(oc)) {
       return range.getRow() + i;
     }
   }
@@ -628,9 +714,10 @@ function findOrderRowByOcInRange_(range, oc) {
 
 function findItemRowInRange_(range, oc, lineNo) {
   const values = range.getValues();
+  const indexMap = getItemIndexMap_(range);
   for (let i = 0; i < values.length; i += 1) {
-    const rowOc = String(values[i][ITEM_RANGE_MAP.oc]);
-    const rowLine = Number(values[i][ITEM_RANGE_MAP.lineNo]);
+    const rowOc = String(values[i][indexMap.oc]);
+    const rowLine = Number(values[i][indexMap.lineNo]);
     if (rowOc === String(oc) && rowLine === Number(lineNo)) {
       return range.getRow() + i;
     }
@@ -640,29 +727,33 @@ function findItemRowInRange_(range, oc, lineNo) {
 
 function readOrdersFromRange_(range) {
   const values = range.getValues();
+  const indexMap = getOrderIndexMap_(range);
   return values
     .filter((row) => {
-      const ocValue = row[ORDER_RANGE_MAP.oc];
+      const ocValue = row[indexMap.oc];
       return ocValue !== null && ocValue !== undefined && String(ocValue).trim() !== '';
     })
     .map((row) => ({
-      oc: row[ORDER_RANGE_MAP.oc],
-      status: row[ORDER_RANGE_MAP.status],
-      sentAt: formatDateValue_(row[ORDER_RANGE_MAP.sentAt]),
-      buyerSelected: row[ORDER_RANGE_MAP.buyerSelected],
-      supplierSelected: row[ORDER_RANGE_MAP.supplierSelected],
-      qtyTotal: row[ORDER_RANGE_MAP.qtyTotal],
-      valueTotal: row[ORDER_RANGE_MAP.valueTotal],
-      buyerDetails: parseJsonSafe_(row[ORDER_RANGE_MAP.buyerDetailsJson]),
-      supplierDetails: parseJsonSafe_(row[ORDER_RANGE_MAP.supplierDetailsJson]),
-      receivedAt: formatDateValue_(row[ORDER_RANGE_MAP.receivedAt]),
+      oc: row[indexMap.oc],
+      status: row[indexMap.status],
+      sentAt: formatDateValue_(row[indexMap.sentAt]),
+      buyerSelected: row[indexMap.buyerSelected],
+      supplierSelected: row[indexMap.supplierSelected],
+      qtyTotal: row[indexMap.qtyTotal],
+      valueTotal: row[indexMap.valueTotal],
+      nf: row[indexMap.nf],
+      nfFrete: row[indexMap.nfFrete],
+      buyerDetails: parseJsonSafe_(row[indexMap.buyerDetailsJson]),
+      supplierDetails: parseJsonSafe_(row[indexMap.supplierDetailsJson]),
+      receivedAt: formatDateValue_(row[indexMap.receivedAt]),
     }));
 }
 
 function readItemsByOcFromRange_(range) {
   const values = range.getValues();
+  const indexMap = getItemIndexMap_(range);
   return values.reduce((acc, row, index) => {
-    const oc = row[ITEM_RANGE_MAP.oc];
+    const oc = row[indexMap.oc];
     if (!oc) {
       return acc;
     }
@@ -671,20 +762,20 @@ function readItemsByOcFromRange_(range) {
     }
     acc[oc].push({
       oc,
-      lineNo: row[ITEM_RANGE_MAP.lineNo],
+      lineNo: row[indexMap.lineNo],
       rowIndex: range.getRow() + index,
-      code: row[ITEM_RANGE_MAP.code],
-      item: row[ITEM_RANGE_MAP.item],
-      unit: row[ITEM_RANGE_MAP.unit],
-      qty: row[ITEM_RANGE_MAP.qty],
-      unitPrice: row[ITEM_RANGE_MAP.unitPrice],
-      total: row[ITEM_RANGE_MAP.total] || (row[ITEM_RANGE_MAP.qty] * row[ITEM_RANGE_MAP.unitPrice]),
-      qtyReceived: row[ITEM_RANGE_MAP.qtyReceived],
-      validity: formatDateOnly_(row[ITEM_RANGE_MAP.validity]),
-      labels: row[ITEM_RANGE_MAP.labels],
-      buyerSelected: row[ITEM_RANGE_MAP.buyerSelected],
-      supplierSelected: row[ITEM_RANGE_MAP.supplierSelected],
-      receivedAt: row[ITEM_RANGE_MAP.receivedAt],
+      code: row[indexMap.code],
+      item: row[indexMap.item],
+      unit: row[indexMap.unit],
+      qty: row[indexMap.qty],
+      unitPrice: row[indexMap.unitPrice],
+      total: row[indexMap.total] || (row[indexMap.qty] * row[indexMap.unitPrice]),
+      qtyReceived: row[indexMap.qtyReceived],
+      validity: formatDateOnly_(row[indexMap.validity]),
+      labels: row[indexMap.labels],
+      buyerSelected: row[indexMap.buyerSelected],
+      supplierSelected: row[indexMap.supplierSelected],
+      receivedAt: row[indexMap.receivedAt],
     });
     return acc;
   }, {});
@@ -695,11 +786,13 @@ function writeOrderRowsToRange_(range, orderRows) {
     return;
   }
   const values = range.getValues();
-  const insertIndex = findNextEmptyIndex_(values, ORDER_RANGE_MAP.oc);
+  const indexMap = getOrderIndexMap_(range);
+  const legacyIndexes = getLegacyOrderDetailIndexes_(range, indexMap);
+  const insertIndex = findNextEmptyIndex_(values, indexMap.oc);
   if (insertIndex === -1 || insertIndex + orderRows.length > values.length) {
     throw new Error('Sem espaço disponível no intervalo CONT_FIN para inserir pedidos.');
   }
-  const output = orderRows.map((row) => mapOrderRowToRange_(row, values[0].length));
+  const output = orderRows.map((row) => mapOrderRowToRange_(row, values[0].length, indexMap, legacyIndexes));
   const sheet = range.getSheet();
   const startRow = range.getRow() + insertIndex;
   const startCol = range.getColumn();
@@ -711,11 +804,12 @@ function writeItemRowsToRange_(range, itemRows) {
     return;
   }
   const values = range.getValues();
-  const insertIndex = findNextEmptyIndex_(values, ITEM_RANGE_MAP.oc);
+  const indexMap = getItemIndexMap_(range);
+  const insertIndex = findNextEmptyIndex_(values, indexMap.oc);
   if (insertIndex === -1 || insertIndex + itemRows.length > values.length) {
     throw new Error('Sem espaço disponível no intervalo REC_POR_ITEM para inserir itens.');
   }
-  const output = itemRows.map((row) => mapItemRowToRange_(row, values[0].length));
+  const output = itemRows.map((row) => mapItemRowToRange_(row, values[0].length, indexMap));
   const sheet = range.getSheet();
   const startRow = range.getRow() + insertIndex;
   const startCol = range.getColumn();
@@ -727,49 +821,94 @@ function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
   const startCol = range.getColumn();
   const startRow = range.getRow();
   const values = range.getValues();
+  const indexMap = getItemIndexMap_(range);
   const receivedText = formatDateTime_(receivedAt);
   values.forEach((row, index) => {
-    if (String(row[ITEM_RANGE_MAP.oc]) !== String(order.oc)) {
+    if (String(row[indexMap.oc]) !== String(order.oc)) {
       return;
     }
     const rowNumber = startRow + index;
-    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.buyerSelected).setValue(order.buyerSelected || '');
-    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.supplierSelected).setValue(order.supplierSelected || '');
-    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.receivedAt).setValue(receivedText);
+    sheet.getRange(rowNumber, startCol + indexMap.buyerSelected).setValue(order.buyerSelected || '');
+    sheet.getRange(rowNumber, startCol + indexMap.supplierSelected).setValue(order.supplierSelected || '');
+    sheet.getRange(rowNumber, startCol + indexMap.receivedAt).setValue(receivedText);
   });
 }
 
-function mapOrderRowToRange_(row, totalCols) {
+function markItemsCancelledInRange_(range, oc) {
+  const sheet = range.getSheet();
+  const startCol = range.getColumn();
+  const startRow = range.getRow();
+  const values = range.getValues();
+  const indexMap = getItemIndexMap_(range);
+  values.forEach((row, index) => {
+    if (String(row[indexMap.oc]) !== String(oc)) {
+      return;
+    }
+    const rowNumber = startRow + index;
+    sheet.getRange(rowNumber, startCol + indexMap.receivedAt).setValue('cancelado');
+  });
+}
+
+function mapOrderRowToRange_(row, totalCols, indexMap, legacyIndexes) {
   const output = Array(totalCols).fill('');
-  output[ORDER_RANGE_MAP.oc] = row[0];
-  output[ORDER_RANGE_MAP.status] = row[1];
-  output[ORDER_RANGE_MAP.sentAt] = row[2];
-  output[ORDER_RANGE_MAP.buyerSelected] = row[3];
-  output[ORDER_RANGE_MAP.supplierSelected] = row[4];
-  output[ORDER_RANGE_MAP.qtyTotal] = row[5];
-  output[ORDER_RANGE_MAP.valueTotal] = row[6];
-  output[ORDER_RANGE_MAP.buyerDetailsJson] = row[7];
-  output[ORDER_RANGE_MAP.supplierDetailsJson] = row[8];
-  output[ORDER_RANGE_MAP.receivedAt] = row[9];
+  output[indexMap.oc] = row.oc;
+  output[indexMap.status] = row.status;
+  output[indexMap.sentAt] = row.sentAt;
+  output[indexMap.buyerSelected] = row.buyerSelected;
+  output[indexMap.supplierSelected] = row.supplierSelected;
+  output[indexMap.qtyTotal] = row.qtyTotal;
+  output[indexMap.valueTotal] = row.valueTotal;
+  output[indexMap.nf] = row.nf;
+  output[indexMap.nfFrete] = row.nfFrete;
+  output[indexMap.buyerDetailsJson] = row.buyerDetailsJson;
+  output[indexMap.supplierDetailsJson] = row.supplierDetailsJson;
+  output[indexMap.receivedAt] = row.receivedAt;
+  clearLegacyOrderDetailColumns_(output, legacyIndexes);
   return output;
 }
 
-function mapItemRowToRange_(row, totalCols) {
+function getLegacyOrderDetailIndexes_(range, indexMap) {
+  const usedIndexes = new Set(Object.values(indexMap));
+  const legacyIndexes = [];
+  LEGACY_ORDER_DETAIL_COLUMNS.forEach((letter) => {
+    const absCol = colLetterToAbsIndex_(letter);
+    try {
+      const rel0 = absToRelIndex0_(absCol, range);
+      if (!usedIndexes.has(rel0)) {
+        legacyIndexes.push(rel0);
+      }
+    } catch (error) {
+      // ignore columns outside the named range
+    }
+  });
+  return legacyIndexes;
+}
+
+function clearLegacyOrderDetailColumns_(output, legacyIndexes) {
+  if (!legacyIndexes || !legacyIndexes.length) {
+    return;
+  }
+  legacyIndexes.forEach((index) => {
+    output[index] = '';
+  });
+}
+
+function mapItemRowToRange_(row, totalCols, indexMap) {
   const output = Array(totalCols).fill('');
-  output[ITEM_RANGE_MAP.oc] = row[0];
-  output[ITEM_RANGE_MAP.lineNo] = row[1];
-  output[ITEM_RANGE_MAP.code] = row[2];
-  output[ITEM_RANGE_MAP.item] = row[3];
-  output[ITEM_RANGE_MAP.unit] = row[4];
-  output[ITEM_RANGE_MAP.qty] = row[5];
-  output[ITEM_RANGE_MAP.unitPrice] = row[6];
-  output[ITEM_RANGE_MAP.total] = row[7];
-  output[ITEM_RANGE_MAP.qtyReceived] = row[8];
-  output[ITEM_RANGE_MAP.validity] = row[9];
-  output[ITEM_RANGE_MAP.labels] = row[10];
-  output[ITEM_RANGE_MAP.buyerSelected] = row[11];
-  output[ITEM_RANGE_MAP.supplierSelected] = row[12];
-  output[ITEM_RANGE_MAP.receivedAt] = row[13];
+  output[indexMap.oc] = row.oc;
+  output[indexMap.lineNo] = row.lineNo;
+  output[indexMap.code] = row.code;
+  output[indexMap.item] = row.item;
+  output[indexMap.unit] = row.unit;
+  output[indexMap.qty] = row.qty;
+  output[indexMap.unitPrice] = row.unitPrice;
+  output[indexMap.total] = row.total;
+  output[indexMap.qtyReceived] = row.qtyReceived;
+  output[indexMap.validity] = row.validity;
+  output[indexMap.labels] = row.labels;
+  output[indexMap.buyerSelected] = row.buyerSelected;
+  output[indexMap.supplierSelected] = row.supplierSelected;
+  output[indexMap.receivedAt] = row.receivedAt;
   return output;
 }
 
