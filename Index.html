@@ -97,6 +97,40 @@
         font-size: 14px;
         margin-top: 8px;
       }
+      .nf-section {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: 12px;
+      }
+      .nf-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 220px;
+      }
+      .nf-inputs {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .nf-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .nf-row input {
+        flex: 1;
+      }
+      .nf-add {
+        border: 1px solid #cbd5e0;
+        background: #edf2f7;
+        color: #2d3748;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
       .details-table {
         width: 100%;
         border-collapse: collapse;
@@ -325,7 +359,10 @@
         }
 
         const filtered = ordersCache
-          .filter((order) => order.status !== 'RECEBIDO')
+          .filter((order) => {
+            const status = String(order.status || '').trim().toLowerCase();
+            return status !== 'recebido' && status !== 'cancelado';
+          })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
         if (!filtered.length) {
           renderEmptyState('Nenhum pedido se adequou ao filtro.');
@@ -351,9 +388,11 @@
           card.className = 'card';
           card.dataset.oc = order.oc;
 
-          const statusClass = order.status === 'RECEBIDO'
+          const statusText = String(order.status || '');
+          const statusNormalized = statusText.trim().toLowerCase();
+          const statusClass = statusNormalized === 'recebido'
             ? 'status'
-            : order.status && order.status.startsWith('CANCEL')
+            : statusNormalized.includes('cancel')
               ? 'status cancel'
               : 'status pending';
 
@@ -375,6 +414,8 @@
           `;
 
           card.innerHTML = header;
+          const headerEl = card.querySelector('.card-header');
+          headerEl.appendChild(buildNfSection(order, card));
 
           if (order.buyerDetails.length || order.supplierDetails.length) {
             const detailsTable = buildDetailsTable(order);
@@ -402,7 +443,13 @@
           cancelButton.textContent = 'Cancelar pedido';
           cancelButton.addEventListener('click', () => handleCancel(order));
 
+          const groupButton = document.createElement('button');
+          groupButton.className = 'btn btn-secondary';
+          groupButton.textContent = 'Agrupar pedido';
+          groupButton.addEventListener('click', () => alert('Em breve'));
+
           actions.appendChild(cancelButton);
+          actions.appendChild(groupButton);
           actions.appendChild(receivedButton);
 
           card.appendChild(actions);
@@ -433,6 +480,104 @@
         `;
         wrapper.appendChild(table);
         return wrapper;
+      }
+
+      function buildNfSection(order, card) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'nf-section';
+
+        const nfGroup = document.createElement('div');
+        nfGroup.className = 'nf-group';
+        const nfLabel = document.createElement('label');
+        nfLabel.textContent = 'NF';
+        const nfInputs = document.createElement('div');
+        nfInputs.className = 'nf-inputs';
+
+        const nfValues = splitNfValues(order.nf);
+        nfValues.forEach((value) => {
+          nfInputs.appendChild(buildNfInputRow(value, order, card));
+        });
+
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.className = 'nf-add';
+        addButton.textContent = '+';
+        addButton.addEventListener('click', () => {
+          const row = buildNfInputRow('', order, card);
+          nfInputs.appendChild(row);
+          const input = row.querySelector('input');
+          if (input) {
+            input.focus();
+          }
+        });
+
+        nfGroup.appendChild(nfLabel);
+        nfGroup.appendChild(nfInputs);
+        nfGroup.appendChild(addButton);
+
+        const nfFreteGroup = document.createElement('div');
+        nfFreteGroup.className = 'nf-group';
+        const nfFreteLabel = document.createElement('label');
+        nfFreteLabel.textContent = 'NF Frete';
+        const nfFreteInput = document.createElement('input');
+        nfFreteInput.type = 'text';
+        nfFreteInput.className = 'nf-frete-input';
+        nfFreteInput.placeholder = 'NF Frete';
+        if (order.nfFrete !== null && order.nfFrete !== undefined) {
+          nfFreteInput.value = order.nfFrete;
+        }
+        nfFreteInput.addEventListener('blur', () => persistNfFields(order, card));
+
+        nfFreteGroup.appendChild(nfFreteLabel);
+        nfFreteGroup.appendChild(nfFreteInput);
+
+        wrapper.appendChild(nfGroup);
+        wrapper.appendChild(nfFreteGroup);
+        return wrapper;
+      }
+
+      function buildNfInputRow(value, order, card) {
+        const row = document.createElement('div');
+        row.className = 'nf-row';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'nf-input';
+        input.placeholder = 'NF';
+        if (value !== null && value !== undefined) {
+          input.value = value;
+        }
+        input.addEventListener('blur', () => persistNfFields(order, card));
+        row.appendChild(input);
+        return row;
+      }
+
+      function splitNfValues(value) {
+        if (!value) {
+          return [''];
+        }
+        const parts = String(value)
+          .split(',')
+          .map((part) => part.trim())
+          .filter((part) => part !== '');
+        return parts.length ? parts : [''];
+      }
+
+      function persistNfFields(order, card) {
+        const nfInputs = card.querySelectorAll('.nf-input');
+        const nfValues = Array.from(nfInputs)
+          .map((input) => input.value.trim())
+          .filter((value) => value !== '');
+        const nfValue = nfValues.join(', ');
+        const nfFreteInput = card.querySelector('.nf-frete-input');
+        const nfFreteValue = nfFreteInput ? nfFreteInput.value.trim() : '';
+
+        google.script.run
+          .withSuccessHandler(() => {
+            order.nf = nfValue;
+            order.nfFrete = nfFreteValue;
+          })
+          .withFailureHandler(showError)
+          .updateOrderHeaderFields(order.oc, nfValue, nfFreteValue);
       }
 
       function buildItemsTable(order) {
@@ -506,9 +651,9 @@
       }
 
       function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) {
-        const qtyValue = qtyInput.value === '' ? '' : Number(qtyInput.value);
+        const qtyValue = qtyInput.value === '' ? '' : parseNumber(qtyInput.value);
         const validityValue = validityInput.value;
-        const labelsValue = labelInput.value === '' ? '' : Number(labelInput.value);
+        const labelsValue = labelInput.value === '' ? '' : parseNumber(labelInput.value);
 
         google.script.run
           .withFailureHandler(showError)
@@ -594,8 +739,9 @@
 
         google.script.run
           .withSuccessHandler(() => {
-            alert('Pedido marcado para cancelamento.');
-            renderFilteredOrders();
+            alert('Pedido cancelado.');
+            removeOrderFromCache(order.oc);
+            removeOrderCard(order.oc);
           })
           .withFailureHandler(showError)
           .cancelOrderStub(order.oc);
