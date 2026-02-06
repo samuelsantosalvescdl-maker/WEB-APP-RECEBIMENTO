@@ -408,6 +408,8 @@
           card.appendChild(actions);
           card.appendChild(message);
           ordersContainer.appendChild(card);
+
+          updateOrderButtonState(order.oc);
         });
       }
 
@@ -533,12 +535,7 @@
         if (!button || button.dataset.locked === 'true') {
           return;
         }
-        if (!button.disabled) {
-          button.disabled = !complete;
-        }
-        if (button && button.disabled && complete) {
-          button.disabled = false;
-        }
+        button.disabled = !complete;
       }
 
       function isOrderComplete(order) {
@@ -627,12 +624,12 @@
       }
 
       function isPositiveNumber(value) {
-        const numberValue = Number(value);
+        const numberValue = parseNumber(value);
         return !Number.isNaN(numberValue) && numberValue > 0;
       }
 
       function isPositiveInteger(value) {
-        const numberValue = Number(value);
+        const numberValue = parseNumber(value);
         return Number.isInteger(numberValue) && numberValue > 0;
       }
 
@@ -640,7 +637,8 @@
         if (!value) {
           return false;
         }
-        return /^\d{2}\/\d{2}\/\d{4}$/.test(String(value).trim());
+        const normalized = String(value).trim().replace(/[-.]/g, '/');
+        return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized);
       }
 
       function openLabelsModal(url) {

@@ -20,19 +20,19 @@ const ORDER_RANGE_MAP = {
 
 const ITEM_RANGE_MAP = {
   oc: 0, // A
-  buyerSelected: 1, // B
-  supplierSelected: 2, // C
-  receivedAt: 3, // D
-  code: 4, // E
-  item: 5, // F
-  unit: 6, // G
-  qty: 7, // H
+  lineNo: 1, // B
+  code: 2, // C
+  item: 3, // D
+  unit: 4, // E
+  qty: 5, // F
+  unitPrice: 6, // G
+  total: 7, // H
   qtyReceived: 8, // I
-  unitPrice: 9, // J
-  validity: 10, // K
-  total: 11, // L
-  lineNo: 12, // M
-  labels: 13, // N
+  validity: 9, // J
+  labels: 10, // K
+  buyerSelected: 11, // L
+  supplierSelected: 12, // M
+  receivedAt: 13, // N
 };
 
 const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
@@ -335,14 +335,15 @@ function getNamedRangeOptions_(spreadsheet, rangeName) {
   return options.map((value) => String(value));
 }
 
-function findNextEmptyIndex_(values) {
-  let lastFilled = -1;
+function findNextEmptyIndex_(values, colIndex) {
+  const column = Number.isInteger(colIndex) ? colIndex : 0;
   for (let i = 0; i < values.length; i += 1) {
-    if (values[i][0] !== null && values[i][0] !== '') {
-      lastFilled = i;
+    const value = values[i][column];
+    if (value === null || value === undefined || String(value).trim() === '') {
+      return i;
     }
   }
-  return lastFilled + 1;
+  return values.length;
 }
 
 function buildRecPorItemRows_(order, items, receivedAt) {
@@ -640,7 +641,10 @@ function findItemRowInRange_(range, oc, lineNo) {
 function readOrdersFromRange_(range) {
   const values = range.getValues();
   return values
-    .filter((row) => row[ORDER_RANGE_MAP.oc])
+    .filter((row) => {
+      const ocValue = row[ORDER_RANGE_MAP.oc];
+      return ocValue !== null && ocValue !== undefined && String(ocValue).trim() !== '';
+    })
     .map((row) => ({
       oc: row[ORDER_RANGE_MAP.oc],
       status: row[ORDER_RANGE_MAP.status],
@@ -691,7 +695,7 @@ function writeOrderRowsToRange_(range, orderRows) {
     return;
   }
   const values = range.getValues();
-  const insertIndex = findNextEmptyIndex_(values);
+  const insertIndex = findNextEmptyIndex_(values, ORDER_RANGE_MAP.oc);
   if (insertIndex === -1 || insertIndex + orderRows.length > values.length) {
     throw new Error('Sem espaço disponível no intervalo CONT_FIN para inserir pedidos.');
   }
@@ -707,7 +711,7 @@ function writeItemRowsToRange_(range, itemRows) {
     return;
   }
   const values = range.getValues();
-  const insertIndex = findNextEmptyIndex_(values);
+  const insertIndex = findNextEmptyIndex_(values, ITEM_RANGE_MAP.oc);
   if (insertIndex === -1 || insertIndex + itemRows.length > values.length) {
     throw new Error('Sem espaço disponível no intervalo REC_POR_ITEM para inserir itens.');
   }
@@ -810,7 +814,14 @@ function isPositiveInteger_(value) {
 }
 
 function isValidDateString_(value) {
-  return typeof value === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(value.trim());
+  if (value instanceof Date) {
+    return true;
+  }
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const normalized = value.trim().replace(/[-.]/g, '/');
+  return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized);
 }
 
 function isItemCompleteWithLabels_(item) {
@@ -818,7 +829,7 @@ function isItemCompleteWithLabels_(item) {
   const labels = parseNumber_(item.labels);
   return isPositiveNumber_(qtyReceived)
     && isPositiveInteger_(labels)
-    && isValidDateString_(String(item.validity || ''));
+    && isValidDateString_(item.validity || '');
 }
 
 function escapeHtml_(value) {
