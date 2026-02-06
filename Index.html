@@ -359,7 +359,10 @@
         }
 
         const filtered = ordersCache
-          .filter((order) => order.status !== 'RECEBIDO')
+          .filter((order) => {
+            const status = String(order.status || '').trim().toLowerCase();
+            return status !== 'recebido' && status !== 'cancelado';
+          })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
         if (!filtered.length) {
           renderEmptyState('Nenhum pedido se adequou ao filtro.');
@@ -385,9 +388,11 @@
           card.className = 'card';
           card.dataset.oc = order.oc;
 
-          const statusClass = order.status === 'RECEBIDO'
+          const statusText = String(order.status || '');
+          const statusNormalized = statusText.trim().toLowerCase();
+          const statusClass = statusNormalized === 'recebido'
             ? 'status'
-            : order.status && order.status.startsWith('CANCEL')
+            : statusNormalized.includes('cancel')
               ? 'status cancel'
               : 'status pending';
 
@@ -734,8 +739,9 @@
 
         google.script.run
           .withSuccessHandler(() => {
-            alert('Pedido marcado para cancelamento.');
-            renderFilteredOrders();
+            alert('Pedido cancelado.');
+            removeOrderFromCache(order.oc);
+            removeOrderCard(order.oc);
           })
           .withFailureHandler(showError)
           .cancelOrderStub(order.oc);

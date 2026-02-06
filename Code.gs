@@ -31,7 +31,7 @@ const ITEM_COLUMN_LETTERS = {
   total: 'L',
   qtyReceived: 'I',
   validity: 'K',
-  labels: 'O',
+  labels: 'N',
   buyerSelected: 'B',
   supplierSelected: 'C',
   receivedAt: 'D',
@@ -257,6 +257,9 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     if (!order) {
       throw new Error('Pedido não encontrado.');
     }
+    if (String(order.status || '').trim().toLowerCase() === 'cancelado') {
+      throw new Error('Pedido cancelado.');
+    }
 
     const items = readItemsByOcFromRange_(itemsRange)[oc] || [];
     if (!items.length) {
@@ -329,6 +332,7 @@ function cancelOrderStub(oc) {
 
   const spreadsheet = getSpreadsheet_();
   const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+  const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
   const row = findOrderRowByOcInRange_(ordersRange, oc);
   if (!row) {
     throw new Error('Pedido não encontrado.');
@@ -337,7 +341,9 @@ function cancelOrderStub(oc) {
   const ordersSheet = ordersRange.getSheet();
   const ordersStartCol = ordersRange.getColumn();
   const orderIndexMap = getOrderIndexMap_(ordersRange);
-  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue('CANCEL_PENDENTE');
+  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue('cancelado');
+
+  markItemsCancelledInRange_(itemsRange, oc);
   return { ok: true };
 }
 
@@ -815,6 +821,21 @@ function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
     sheet.getRange(rowNumber, startCol + indexMap.buyerSelected).setValue(order.buyerSelected || '');
     sheet.getRange(rowNumber, startCol + indexMap.supplierSelected).setValue(order.supplierSelected || '');
     sheet.getRange(rowNumber, startCol + indexMap.receivedAt).setValue(receivedText);
+  });
+}
+
+function markItemsCancelledInRange_(range, oc) {
+  const sheet = range.getSheet();
+  const startCol = range.getColumn();
+  const startRow = range.getRow();
+  const values = range.getValues();
+  const indexMap = getItemIndexMap_(range);
+  values.forEach((row, index) => {
+    if (String(row[indexMap.oc]) !== String(oc)) {
+      return;
+    }
+    const rowNumber = startRow + index;
+    sheet.getRange(rowNumber, startCol + indexMap.receivedAt).setValue('cancelado');
   });
 }
 
