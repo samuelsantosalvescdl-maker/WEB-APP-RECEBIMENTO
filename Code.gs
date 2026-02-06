@@ -518,7 +518,7 @@ function sendToWebAppC_(order, items, pdfResult) {
   }
 
   if (parsed && (parsed.ok === true || parsed.duplicate === true)) {
-    return;
+    return { ok: true, duplicate: parsed.duplicate === true };
   }
 
   if (parsed && parsed.ok === false) {
