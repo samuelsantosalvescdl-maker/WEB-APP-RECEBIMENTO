@@ -20,15 +20,18 @@ const ORDER_RANGE_MAP = {
 
 const ITEM_RANGE_MAP = {
   oc: 0, // A
-  lineNo: 12, // M
+  buyerSelected: 1, // B
+  supplierSelected: 2, // C
+  receivedAt: 3, // D
   code: 4, // E
   item: 5, // F
   unit: 6, // G
   qty: 7, // H
-  unitPrice: 9, // J
-  total: 11, // L
   qtyReceived: 8, // I
+  unitPrice: 9, // J
   validity: 10, // K
+  total: 11, // L
+  lineNo: 12, // M
   labels: 13, // N
 };
 
@@ -129,7 +132,9 @@ function doPost(e) {
       const orderRow = buildOrderRow_(payload);
       writeOrderRowsToRange_(ordersRange, [orderRow]);
 
-      const itemRows = buildItemRows_(payload.oc, payload.items);
+      const buyer = payload.buyer || {};
+      const supplier = payload.supplier || {};
+      const itemRows = buildItemRows_(payload.oc, payload.items, buyer.selected || '', supplier.selected || '');
       if (itemRows.length) {
         writeItemRowsToRange_(itemsRange, itemRows);
       }
@@ -236,8 +241,7 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
 
     const receivedAt = new Date();
     const recRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
-    const recRows = buildRecPorItemRows_(order, items, receivedAt);
-    writeItemRowsToRange_(recRange, recRows);
+    updateReceiptFieldsInRange_(recRange, items, order, receivedAt);
 
     deleteLastPdf_();
     const pdfResult = generateLabelsPdf_(oc, order, items, width, height);
@@ -345,16 +349,19 @@ function buildRecPorItemRows_(order, items, receivedAt) {
   const timestamp = formatDateTime_(receivedAt);
   return items.map((item) => [
     order.oc,
-    order.buyerSelected || '',
-    order.supplierSelected || '',
-    timestamp,
+    item.lineNo || '',
     item.code || '',
     item.item || '',
     item.unit || '',
     item.qty || 0,
-    Number(item.qtyReceived) || 0,
     item.unitPrice || 0,
+    item.total || 0,
+    Number(item.qtyReceived) || 0,
     item.validity || '',
+    Number(item.labels) || 0,
+    order.buyerSelected || '',
+    order.supplierSelected || '',
+    timestamp,
   ]);
 }
 
@@ -587,7 +594,7 @@ function buildOrderRow_(payload) {
   ];
 }
 
-function buildItemRows_(oc, items) {
+function buildItemRows_(oc, items, buyerSelected, supplierSelected) {
   return items.map((item, index) => {
     return [
       oc,
@@ -600,6 +607,9 @@ function buildItemRows_(oc, items) {
       item.total || 0,
       '',
       '',
+      '',
+      buyerSelected || '',
+      supplierSelected || '',
       '',
     ];
   });
@@ -664,10 +674,13 @@ function readItemsByOcFromRange_(range) {
       unit: row[ITEM_RANGE_MAP.unit],
       qty: row[ITEM_RANGE_MAP.qty],
       unitPrice: row[ITEM_RANGE_MAP.unitPrice],
-      total: row[ITEM_RANGE_MAP.total],
+      total: row[ITEM_RANGE_MAP.total] || (row[ITEM_RANGE_MAP.qty] * row[ITEM_RANGE_MAP.unitPrice]),
       qtyReceived: row[ITEM_RANGE_MAP.qtyReceived],
       validity: formatDateOnly_(row[ITEM_RANGE_MAP.validity]),
       labels: row[ITEM_RANGE_MAP.labels],
+      buyerSelected: row[ITEM_RANGE_MAP.buyerSelected],
+      supplierSelected: row[ITEM_RANGE_MAP.supplierSelected],
+      receivedAt: row[ITEM_RANGE_MAP.receivedAt],
     });
     return acc;
   }, {});
@@ -705,6 +718,23 @@ function writeItemRowsToRange_(range, itemRows) {
   sheet.getRange(startRow, startCol, output.length, output[0].length).setValues(output);
 }
 
+function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
+  const sheet = range.getSheet();
+  const startCol = range.getColumn();
+  const startRow = range.getRow();
+  const values = range.getValues();
+  const receivedText = formatDateTime_(receivedAt);
+  values.forEach((row, index) => {
+    if (String(row[ITEM_RANGE_MAP.oc]) !== String(order.oc)) {
+      return;
+    }
+    const rowNumber = startRow + index;
+    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.buyerSelected).setValue(order.buyerSelected || '');
+    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.supplierSelected).setValue(order.supplierSelected || '');
+    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.receivedAt).setValue(receivedText);
+  });
+}
+
 function mapOrderRowToRange_(row, totalCols) {
   const output = Array(totalCols).fill('');
   output[ORDER_RANGE_MAP.oc] = row[0];
@@ -733,6 +763,9 @@ function mapItemRowToRange_(row, totalCols) {
   output[ITEM_RANGE_MAP.qtyReceived] = row[8];
   output[ITEM_RANGE_MAP.validity] = row[9];
   output[ITEM_RANGE_MAP.labels] = row[10];
+  output[ITEM_RANGE_MAP.buyerSelected] = row[11];
+  output[ITEM_RANGE_MAP.supplierSelected] = row[12];
+  output[ITEM_RANGE_MAP.receivedAt] = row[13];
   return output;
 }
 
