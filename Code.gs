@@ -115,8 +115,10 @@ function doPost(e) {
     }
 
     const apiKey = parameterKey || (payload && payload.apiKey);
+    const apiKeyNormalized = String(apiKey || '').trim();
+    const expectedKey = String(API_KEY || '').trim();
 
-    if (!apiKey || apiKey !== API_KEY) {
+    if (!apiKeyNormalized || apiKeyNormalized !== expectedKey) {
       return jsonResponse_({ ok: false, error: 'API key inválida.' });
     }
 
