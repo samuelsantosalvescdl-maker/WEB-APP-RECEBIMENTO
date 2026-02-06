@@ -360,8 +360,8 @@
 
         const filtered = ordersCache
           .filter((order) => {
-            const status = String(order.status || '').trim().toLowerCase();
-            return status === 'pendente';
+            const status = normalizeText(order.status);
+            return !status || status === 'PENDENTE';
           })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
         if (!filtered.length) {
