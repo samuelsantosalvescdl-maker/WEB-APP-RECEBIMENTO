@@ -15,8 +15,8 @@ const ORDER_COLUMN_LETTERS = {
   valueTotal: 'F',
   nf: 'K',
   nfFrete: 'L',
-  buyerDetailsJson: 'M',
-  supplierDetailsJson: 'N',
+  buyerDetailsJson: 'I',
+  supplierDetailsJson: 'J',
   receivedAt: 'O',
 };
 
