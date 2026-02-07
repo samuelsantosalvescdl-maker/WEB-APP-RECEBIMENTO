@@ -259,6 +259,10 @@
           <label for="labelHeightCm">Altura etiqueta (cm)</label>
           <input id="labelHeightCm" type="text" placeholder="Ex: 3,0">
         </div>
+        <div class="filter-group">
+          <label>&nbsp;</label>
+          <button id="groupSelected" class="btn btn-secondary" type="button" disabled>Agrupar selecionados</button>
+        </div>
       </div>
     </div>
     <div class="container">
@@ -291,6 +295,7 @@
       const supplierFilter = document.getElementById('supplierFilter');
       const labelWidthInput = document.getElementById('labelWidthCm');
       const labelHeightInput = document.getElementById('labelHeightCm');
+      const groupSelectedButton = document.getElementById('groupSelected');
       const labelsModal = document.getElementById('labelsModal');
       const pdfLink = document.getElementById('pdfLink');
       const printPdf = document.getElementById('printPdf');
@@ -303,6 +308,7 @@
       const debugBuyer = document.getElementById('debugBuyer');
       const debugSupplier = document.getElementById('debugSupplier');
       let ordersCache = [];
+      const selectedGroupOcs = new Set();
 
       function init() {
         loadFilterOptions();
@@ -310,6 +316,9 @@
 
         buyerFilter.addEventListener('change', renderFilteredOrders);
         supplierFilter.addEventListener('change', renderFilteredOrders);
+        if (groupSelectedButton) {
+          groupSelectedButton.addEventListener('click', handleGroupSelected);
+        }
         closeModal.addEventListener('click', closeLabelsModal);
         labelsModal.addEventListener('click', (event) => {
           if (event.target === labelsModal) {
@@ -429,6 +438,7 @@
         google.script.run
           .withSuccessHandler((orders) => {
             ordersCache = orders || [];
+            selectedGroupOcs.clear();
             console.log('[refreshOrders] total:', (ordersCache || []).length,
               'ocs:', (ordersCache || []).map((order) => order && order.oc));
             renderFilteredOrders();
@@ -469,8 +479,8 @@
               <div class="card-header">
                 <div class="card-title">Confirmação de Pedido</div>
                 <div class="highlight-row">
-                  <div>OC: ${escapeHtml(normalized.oc)}</div>
-                  <div>Enviado em: ${formatDate(normalized.sentAt)}</div>
+                  <div>OC: ${escapeHtml(normalized.groupOcs || normalized.oc)}</div>
+                  <div>Enviado em: ${escapeHtml(normalized.groupSentAts || formatDate(normalized.sentAt))}</div>
                   <div>Status: <span class="${statusClass}">${escapeHtml(normalized.status || 'PENDENTE')}</span></div>
                 </div>
                 <div class="summary">
@@ -485,6 +495,26 @@
             card.innerHTML = header;
             const headerEl = card.querySelector('.card-header');
             headerEl.appendChild(buildNfSection(normalized, card));
+            if (normalizeText(normalized.status).startsWith('PENDENTE')) {
+              const selectRow = document.createElement('div');
+              const selectInput = document.createElement('input');
+              selectInput.type = 'checkbox';
+              selectInput.checked = selectedGroupOcs.has(normalized.oc);
+              selectInput.addEventListener('change', () => {
+                if (selectInput.checked) {
+                  selectedGroupOcs.add(normalized.oc);
+                } else {
+                  selectedGroupOcs.delete(normalized.oc);
+                }
+                updateGroupButtonState();
+              });
+              const selectLabel = document.createElement('label');
+              selectLabel.style.marginLeft = '8px';
+              selectLabel.textContent = 'Selecionar para agrupar';
+              selectRow.appendChild(selectInput);
+              selectRow.appendChild(selectLabel);
+              headerEl.appendChild(selectRow);
+            }
 
             if (normalized.buyerDetails.length || normalized.supplierDetails.length) {
               const detailsTable = buildDetailsTable(normalized);
@@ -544,6 +574,7 @@
         });
 
         ordersContainer.appendChild(frag);
+        updateGroupButtonState();
         console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
       }
 
@@ -585,10 +616,23 @@
           nfInputs.appendChild(buildNfInputRow(value, order, card));
         });
 
+        const nfToggle = document.createElement('label');
+        nfToggle.style.display = 'flex';
+        nfToggle.style.alignItems = 'center';
+        nfToggle.style.gap = '6px';
+        const nfCheckbox = document.createElement('input');
+        nfCheckbox.type = 'checkbox';
+        nfCheckbox.checked = String(order.nf || '').toLowerCase() === 'não veio';
+        nfToggle.appendChild(nfCheckbox);
+        nfToggle.appendChild(document.createTextNode('Não veio'));
+
         const addButton = document.createElement('button');
         addButton.type = 'button';
         addButton.className = 'nf-add';
         addButton.textContent = '+';
+        if (nfCheckbox.checked) {
+          addButton.disabled = true;
+        }
         addButton.addEventListener('click', () => {
           const row = buildNfInputRow('', order, card);
           nfInputs.appendChild(row);
@@ -600,6 +644,7 @@
 
         nfGroup.appendChild(nfLabel);
         nfGroup.appendChild(nfInputs);
+        nfGroup.appendChild(nfToggle);
         nfGroup.appendChild(addButton);
 
         const nfFreteGroup = document.createElement('div');
@@ -613,13 +658,64 @@
         if (order.nfFrete !== null && order.nfFrete !== undefined) {
           nfFreteInput.value = order.nfFrete;
         }
+        if (String(order.nfFrete || '').toLowerCase() === 'não veio') {
+          nfFreteInput.disabled = true;
+        }
         nfFreteInput.addEventListener('blur', () => persistNfFields(order, card));
+
+        const nfFreteToggle = document.createElement('label');
+        nfFreteToggle.style.display = 'flex';
+        nfFreteToggle.style.alignItems = 'center';
+        nfFreteToggle.style.gap = '6px';
+        const nfFreteCheckbox = document.createElement('input');
+        nfFreteCheckbox.type = 'checkbox';
+        nfFreteCheckbox.checked = String(order.nfFrete || '').toLowerCase() === 'não veio';
+        nfFreteToggle.appendChild(nfFreteCheckbox);
+        nfFreteToggle.appendChild(document.createTextNode('Não veio'));
 
         nfFreteGroup.appendChild(nfFreteLabel);
         nfFreteGroup.appendChild(nfFreteInput);
+        nfFreteGroup.appendChild(nfFreteToggle);
 
         wrapper.appendChild(nfGroup);
         wrapper.appendChild(nfFreteGroup);
+
+        nfCheckbox.addEventListener('change', () => {
+          if (nfCheckbox.checked) {
+            nfInputs.innerHTML = '';
+            nfInputs.appendChild(buildNfInputRow('não veio', order, card));
+            nfInputs.querySelectorAll('input').forEach((input) => {
+              input.value = 'não veio';
+              input.disabled = true;
+            });
+            addButton.disabled = true;
+            persistNfFields(order, card);
+          } else {
+            nfInputs.querySelectorAll('input').forEach((input) => {
+              if (String(input.value).toLowerCase() === 'não veio') {
+                input.value = '';
+              }
+              input.disabled = false;
+            });
+            addButton.disabled = false;
+            persistNfFields(order, card);
+          }
+        });
+
+        nfFreteCheckbox.addEventListener('change', () => {
+          if (nfFreteCheckbox.checked) {
+            nfFreteInput.value = 'não veio';
+            nfFreteInput.disabled = true;
+            persistNfFields(order, card);
+          } else {
+            if (String(nfFreteInput.value).toLowerCase() === 'não veio') {
+              nfFreteInput.value = '';
+            }
+            nfFreteInput.disabled = false;
+            persistNfFields(order, card);
+          }
+        });
+
         return wrapper;
       }
 
@@ -1032,6 +1128,8 @@
           valueTotal: order && order.valueTotal !== undefined ? order.valueTotal : 0,
           nf: safeText(order && order.nf),
           nfFrete: safeText(order && order.nfFrete),
+          groupOcs: safeText(order && order.groupOcs),
+          groupSentAts: safeText(order && order.groupSentAts),
           buyerDetails: asArray(order && order.buyerDetails),
           supplierDetails: asArray(order && order.supplierDetails),
           items: Array.isArray(order && order.items) ? order.items : [],
@@ -1050,6 +1148,35 @@
           rowIndex: item && item.rowIndex !== undefined ? item.rowIndex : null,
         }));
         return normalized;
+      }
+
+      function updateGroupButtonState() {
+        if (!groupSelectedButton) {
+          return;
+        }
+        groupSelectedButton.disabled = selectedGroupOcs.size < 2;
+      }
+
+      function handleGroupSelected() {
+        const ocList = Array.from(selectedGroupOcs);
+        if (ocList.length < 2) {
+          alert('Selecione ao menos dois pedidos.');
+          return;
+        }
+        const selectedOrders = ordersCache.filter((order) => ocList.includes(order.oc));
+        const supplier = normalizeText(selectedOrders[0] && selectedOrders[0].supplierSelected);
+        const mismatch = selectedOrders.find((order) => normalizeText(order.supplierSelected) !== supplier);
+        if (mismatch) {
+          alert('Só é possível agrupar pedidos com o mesmo fornecedor.');
+          return;
+        }
+        google.script.run
+          .withSuccessHandler((response) => {
+            alert(`Pedidos agrupados em ${response.ocPrimary}.`);
+            refreshOrders();
+          })
+          .withFailureHandler(showError)
+          .groupOrders(ocList);
       }
 
       function matchesFilter(order, buyerValue, supplierValue) {

@@ -17,10 +17,10 @@ const ORDER_COLUMN_LETTERS = {
   nfFrete: 'L',
   buyerDetailsJson: 'I',
   supplierDetailsJson: 'J',
+  groupOcs: 'M',
+  groupSentAts: 'N',
   receivedAt: 'O',
 };
-
-const LEGACY_ORDER_DETAIL_COLUMNS = ['M', 'N'];
 
 const ITEM_COLUMN_LETTERS = {
   oc: 'A',
@@ -62,6 +62,8 @@ const ORDER_HEADERS = [
   'nfFrete',
   'buyerDetailsJson',
   'supplierDetailsJson',
+  'groupOcs',
+  'groupSentAts',
   'receivedAt',
 ];
 
@@ -274,7 +276,7 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     if (!order) {
       throw new Error('Pedido não encontrado.');
     }
-    if (String(order.status || '').trim().toLowerCase() === 'cancelado') {
+    if (normalizeText_(order.status) === 'CANCELADO') {
       throw new Error('Pedido cancelado.');
     }
 
@@ -300,8 +302,19 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     const ordersSheet = ordersRange.getSheet();
     const ordersStartCol = ordersRange.getColumn();
     const orderIndexMap = getOrderIndexMap_(ordersRange);
-    ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
-    ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
+    const groupOcs = parseGroupOcs_(order.groupOcs);
+    if (groupOcs.length) {
+      groupOcs.forEach((groupOc) => {
+        const groupRow = findOrderRowByOcInRange_(ordersRange, groupOc);
+        if (groupRow) {
+          ordersSheet.getRange(groupRow, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
+          ordersSheet.getRange(groupRow, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
+        }
+      });
+    } else {
+      ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
+      ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
+    }
 
     return { ok: true, oc, pdfUrl: pdfResult.pdfUrl, pdfFileId: pdfResult.pdfFileId };
   } finally {
@@ -358,9 +371,20 @@ function cancelOrderStub(oc) {
   const ordersSheet = ordersRange.getSheet();
   const ordersStartCol = ordersRange.getColumn();
   const orderIndexMap = getOrderIndexMap_(ordersRange);
-  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue('cancelado');
-
-  markItemsCancelledInRange_(itemsRange, oc);
+  const order = readOrdersFromRange_(ordersRange).find((entry) => String(entry.oc) === String(oc));
+  const groupOcs = order ? parseGroupOcs_(order.groupOcs) : [];
+  if (groupOcs.length) {
+    groupOcs.forEach((groupOc) => {
+      const groupRow = findOrderRowByOcInRange_(ordersRange, groupOc);
+      if (groupRow) {
+        ordersSheet.getRange(groupRow, ordersStartCol + orderIndexMap.status).setValue('CANCELADO');
+      }
+    });
+    markItemsCancelledInRange_(itemsRange, oc);
+  } else {
+    ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue('CANCELADO');
+    markItemsCancelledInRange_(itemsRange, oc);
+  }
   return { ok: true };
 }
 
@@ -625,6 +649,18 @@ function sendToWebAppC_(order, items, pdfResult) {
   if (!parsed) {
     throw new Error(buildWebAppCError_(status, null, text));
   }
+  const info = {
+    scriptId: parsed.scriptId || '',
+    expectedKeyLast3: parsed.expectedKeyLast3 || '',
+  };
+  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
+  return info;
+}
+
+function buildWebAppCError_(status, message, bodyText) {
+  const snippet = String(bodyText || '').slice(0, 200);
+  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
+  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
 }
 
 function testWebAppCConnection_() {
@@ -718,6 +754,8 @@ function buildOrderRow_(payload, normalized) {
     nfFrete: '',
     buyerDetailsJson: JSON.stringify(normalized.buyerDetails || []),
     supplierDetailsJson: JSON.stringify(normalized.supplierDetails || []),
+    groupOcs: '',
+    groupSentAts: '',
     receivedAt: '',
   };
 }
@@ -768,7 +806,6 @@ function findItemRowInRange_(range, oc, lineNo) {
 function readOrdersFromRange_(range) {
   const values = range.getValues();
   const indexMap = getOrderIndexMap_(range);
-  const legacyDetails = getLegacyOrderDetailIndexes_(range, indexMap);
   return values
     .filter((row) => {
       const ocValue = row[indexMap.oc];
@@ -784,8 +821,10 @@ function readOrdersFromRange_(range) {
       valueTotal: row[indexMap.valueTotal],
       nf: row[indexMap.nf],
       nfFrete: row[indexMap.nfFrete],
-      buyerDetails: parseOrderDetails_(row, indexMap.buyerDetailsJson, legacyDetails[0]),
-      supplierDetails: parseOrderDetails_(row, indexMap.supplierDetailsJson, legacyDetails[1]),
+      buyerDetails: parseJsonSafe_(row[indexMap.buyerDetailsJson]),
+      supplierDetails: parseJsonSafe_(row[indexMap.supplierDetailsJson]),
+      groupOcs: row[indexMap.groupOcs] || '',
+      groupSentAts: row[indexMap.groupSentAts] || '',
       receivedAt: formatDateValue_(row[indexMap.receivedAt]),
     }));
 }
@@ -835,12 +874,11 @@ function writeOrderRowsToRange_(range, orderRows) {
   }
   const values = range.getValues();
   const indexMap = getOrderIndexMap_(range);
-  const legacyIndexes = getLegacyOrderDetailIndexes_(range, indexMap);
   const insertIndex = findNextEmptyIndex_(values, indexMap.oc);
   if (insertIndex === -1 || insertIndex + orderRows.length > values.length) {
     throw new Error('Sem espaço disponível no intervalo CONT_FIN para inserir pedidos.');
   }
-  const output = orderRows.map((row) => mapOrderRowToRange_(row, values[0].length, indexMap, legacyIndexes));
+  const output = orderRows.map((row) => mapOrderRowToRange_(row, values[0].length, indexMap));
   const sheet = range.getSheet();
   const startRow = range.getRow() + insertIndex;
   const startCol = range.getColumn();
@@ -893,11 +931,11 @@ function markItemsCancelledInRange_(range, oc) {
       return;
     }
     const rowNumber = startRow + index;
-    sheet.getRange(rowNumber, startCol + indexMap.receivedAt).setValue('cancelado');
+    sheet.getRange(rowNumber, startCol + indexMap.receivedAt).setValue('CANCELADO');
   });
 }
 
-function mapOrderRowToRange_(row, totalCols, indexMap, legacyIndexes) {
+function mapOrderRowToRange_(row, totalCols, indexMap) {
   const output = Array(totalCols).fill('');
   output[indexMap.oc] = row.oc;
   output[indexMap.status] = row.status;
@@ -910,35 +948,10 @@ function mapOrderRowToRange_(row, totalCols, indexMap, legacyIndexes) {
   output[indexMap.nfFrete] = row.nfFrete;
   output[indexMap.buyerDetailsJson] = row.buyerDetailsJson;
   output[indexMap.supplierDetailsJson] = row.supplierDetailsJson;
+  output[indexMap.groupOcs] = row.groupOcs;
+  output[indexMap.groupSentAts] = row.groupSentAts;
   output[indexMap.receivedAt] = row.receivedAt;
-  clearLegacyOrderDetailColumns_(output, legacyIndexes);
   return output;
-}
-
-function getLegacyOrderDetailIndexes_(range, indexMap) {
-  const usedIndexes = new Set(Object.values(indexMap));
-  const legacyIndexes = [];
-  LEGACY_ORDER_DETAIL_COLUMNS.forEach((letter) => {
-    const absCol = colLetterToAbsIndex_(letter);
-    try {
-      const rel0 = absToRelIndex0_(absCol, range);
-      if (!usedIndexes.has(rel0)) {
-        legacyIndexes.push(rel0);
-      }
-    } catch (error) {
-      // ignore columns outside the named range
-    }
-  });
-  return legacyIndexes;
-}
-
-function clearLegacyOrderDetailColumns_(output, legacyIndexes) {
-  if (!legacyIndexes || !legacyIndexes.length) {
-    return;
-  }
-  legacyIndexes.forEach((index) => {
-    output[index] = '';
-  });
 }
 
 function getLegacyItemBuyerSupplierIndexes_(range, indexMap) {
@@ -1002,6 +1015,15 @@ function isNumeric_(value) {
   }
   const numberValue = Number(String(value).replace(',', '.'));
   return !Number.isNaN(numberValue);
+}
+
+function normalizeText_(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
 }
 
 function inferBuyerSupplier_(order, items) {
@@ -1106,11 +1128,159 @@ function parseOrderDetails_(row, primaryIndex, legacyIndex) {
   if (primaryValue) {
     return parseJsonSafe_(primaryValue);
   }
-  if (legacyIndex !== null && legacyIndex !== undefined) {
-    const legacyValue = row[legacyIndex];
-    return parseJsonSafe_(legacyValue);
-  }
   return [];
+}
+
+function parseGroupOcs_(groupOcs) {
+  if (!groupOcs) {
+    return [];
+  }
+  return String(groupOcs)
+    .split(',')
+    .map((entry) => String(entry).trim())
+    .filter((entry) => entry);
+}
+
+function groupOrders(ocList) {
+  if (!Array.isArray(ocList) || ocList.length < 2) {
+    throw new Error('Selecione ao menos dois pedidos para agrupar.');
+  }
+
+  const ocKeys = ocList.map((oc) => String(oc || '').trim()).filter((oc) => oc);
+  if (ocKeys.length < 2) {
+    throw new Error('OCs inválidas para agrupamento.');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+  const spreadsheet = getSpreadsheet_();
+  const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+  const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
+
+  const orders = readOrdersFromRange_(ordersRange);
+  const orderMap = new Map();
+  orders.forEach((order) => {
+    orderMap.set(String(order.oc || '').trim(), order);
+  });
+
+  const missing = ocKeys.find((oc) => !orderMap.has(oc));
+  if (missing) {
+    throw new Error(`Pedido não encontrado: ${missing}`);
+  }
+
+  const invalidStatus = ocKeys.find((oc) => {
+    const status = normalizeText_(orderMap.get(oc).status);
+    return status && !status.startsWith('PENDENTE');
+  });
+  if (invalidStatus) {
+    throw new Error('Só é possível agrupar pedidos pendentes.');
+  }
+
+  const ocPrimary = ocKeys[0];
+  const primaryOrder = orderMap.get(ocPrimary);
+  const itemsByOc = readItemsByOcFromRange_(itemsRange);
+  const primaryItems = itemsByOc[ocPrimary] || [];
+  const inferredPrimary = inferBuyerSupplier_(primaryOrder, primaryItems);
+
+  const allOrders = ocKeys.map((oc) => orderMap.get(oc));
+  const suppliers = new Set();
+  allOrders.forEach((order) => {
+    const items = itemsByOc[String(order.oc || '').trim()] || [];
+    const inferred = inferBuyerSupplier_(order, items);
+    const normalizedSupplier = normalizeText_(inferred.supplierSelected);
+    if (normalizedSupplier) {
+      suppliers.add(normalizedSupplier);
+    }
+  });
+  if (suppliers.size > 1) {
+    throw new Error('Os pedidos selecionados devem ter o mesmo fornecedor.');
+  }
+
+  const groupOcs = ocKeys.join(', ');
+  const groupSentAts = allOrders.map((order) => {
+    if (order.sentAt instanceof Date) {
+      return formatDateTime_(order.sentAt);
+    }
+    return order.sentAt || '';
+  }).join(', ');
+
+  const qtyTotalSum = allOrders.reduce((acc, order) => acc + Number(order.qtyTotal || 0), 0);
+  const valueTotalSum = allOrders.reduce((acc, order) => acc + Number(order.valueTotal || 0), 0);
+
+  const nf = primaryOrder.nf || allOrders.map((order) => order.nf).find((value) => value) || '';
+  const nfFrete = primaryOrder.nfFrete || allOrders.map((order) => order.nfFrete).find((value) => value) || '';
+
+  const ordersSheet = ordersRange.getSheet();
+  const ordersStartCol = ordersRange.getColumn();
+  const orderIndexMap = getOrderIndexMap_(ordersRange);
+
+  const primaryRow = findOrderRowByOcInRange_(ordersRange, ocPrimary);
+  if (!primaryRow) {
+    throw new Error('Pedido primário não encontrado.');
+  }
+
+  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.qtyTotal).setValue(qtyTotalSum);
+  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.valueTotal).setValue(valueTotalSum);
+  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.groupOcs).setValue(groupOcs);
+  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.groupSentAts).setValue(groupSentAts);
+  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.nf).setValue(nf || '');
+  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.nfFrete).setValue(nfFrete || '');
+  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.buyerSelected).setValue(inferredPrimary.buyerSelected || '');
+  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.supplierSelected).setValue(inferredPrimary.supplierSelected || '');
+
+  ocKeys.slice(1).forEach((oc) => {
+    const row = findOrderRowByOcInRange_(ordersRange, oc);
+    if (row) {
+      ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue(`AGRUPADO EM ${ocPrimary}`);
+      ordersSheet.getRange(row, ordersStartCol + orderIndexMap.groupOcs).setValue(groupOcs);
+      ordersSheet.getRange(row, ordersStartCol + orderIndexMap.groupSentAts).setValue(groupSentAts);
+    }
+  });
+
+  const itemsSheet = itemsRange.getSheet();
+  const itemsStartCol = itemsRange.getColumn();
+  const itemIndexMap = getItemIndexMap_(itemsRange);
+  const itemValues = itemsRange.getValues();
+  const updatedRows = [];
+  itemValues.forEach((row, index) => {
+    const ocKey = String(row[itemIndexMap.oc] || '').trim();
+    if (!ocKeys.includes(ocKey)) {
+      return;
+    }
+    row[itemIndexMap.oc] = ocPrimary;
+    row[itemIndexMap.buyerSelected] = inferredPrimary.buyerSelected || '';
+    row[itemIndexMap.supplierSelected] = inferredPrimary.supplierSelected || '';
+    updatedRows.push({ index, row });
+  });
+
+  updatedRows.forEach(({ index, row }) => {
+    itemsSheet.getRange(itemsRange.getRow() + index, itemsStartCol, 1, row.length).setValues([row]);
+  });
+
+  const refreshedValues = itemsRange.getValues();
+  const primaryItemIndexes = [];
+  refreshedValues.forEach((row, index) => {
+    const ocKey = String(row[itemIndexMap.oc] || '').trim();
+    if (ocKey === ocPrimary) {
+      primaryItemIndexes.push(index);
+    }
+  });
+  primaryItemIndexes.forEach((rowIndex, idx) => {
+    itemsSheet.getRange(itemsRange.getRow() + rowIndex, itemsStartCol + itemIndexMap.lineNo).setValue(idx + 1);
+  });
+
+  return {
+    ok: true,
+    ocPrimary,
+    groupOcs,
+    mergedCountItems: primaryItemIndexes.length,
+    updatedOrders: ocKeys,
+  };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function formatDateValue_(value) {
