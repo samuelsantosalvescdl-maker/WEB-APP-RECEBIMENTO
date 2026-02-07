@@ -382,6 +382,11 @@
             return !status || status.startsWith('PENDENTE');
           })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
+        console.log('[renderFilteredOrders] pending:', pendingOrders.length,
+          'filtered:', filtered.length,
+          'buyerFilter:', buyerValue,
+          'supplierFilter:', supplierValue,
+          'filtered ocs:', filtered.map((order) => order && order.oc));
         const notMatching = pendingOrders.filter((order) => !matchesFilter(order, buyerValue, supplierValue));
         if (notMatching.length) {
           console.log('Pedidos pendentes fora do filtro (amostra):', notMatching.slice(0, 5).map((order) => ({
@@ -424,6 +429,8 @@
         google.script.run
           .withSuccessHandler((orders) => {
             ordersCache = orders || [];
+            console.log('[refreshOrders] total:', (ordersCache || []).length,
+              'ocs:', (ordersCache || []).map((order) => order && order.oc));
             renderFilteredOrders();
           })
           .withFailureHandler(showError)
@@ -431,87 +438,113 @@
       }
 
       function renderOrders(orders) {
+        console.log('[renderOrders] input size:', orders.length, 'ocs:', orders.map((order) => order && order.oc));
         ordersContainer.innerHTML = '';
-        if (!orders.length) {
+        if (!orders || !orders.length) {
           ordersContainer.innerHTML = '<div class="card">Nenhum pedido encontrado.</div>';
+          console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
           return;
         }
 
-        orders.forEach((order) => {
-          const card = document.createElement('div');
-          card.className = 'card';
-          card.dataset.oc = order.oc;
+        const frag = document.createDocumentFragment();
 
-          const statusText = String(order.status || '');
-          const statusNormalized = statusText.trim().toLowerCase();
-          const statusClass = statusNormalized === 'recebido'
-            ? 'status'
-            : statusNormalized.includes('cancel')
-              ? 'status cancel'
-              : 'status pending';
+        orders.forEach((order, idx) => {
+          try {
+            const normalized = normalizeOrder_(order);
+            console.log('[renderOrders] rendering idx:', idx, 'oc:', normalized.oc);
 
-          const header = `
-            <div class="card-header">
-              <div class="card-title">Confirmação de Pedido</div>
-              <div class="highlight-row">
-                <div>OC: ${escapeHtml(order.oc)}</div>
-                <div>Enviado em: ${formatDate(order.sentAt)}</div>
-                <div>Status: <span class="${statusClass}">${escapeHtml(order.status || 'PENDENTE')}</span></div>
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.dataset.oc = normalized.oc;
+
+            const statusText = String(normalized.status || '');
+            const statusNormalized = normalizeText(statusText);
+            const statusClass = statusNormalized.startsWith('RECEBIDO')
+              ? 'status'
+              : statusNormalized.includes('CANCEL')
+                ? 'status cancel'
+                : 'status pending';
+
+            const header = `
+              <div class="card-header">
+                <div class="card-title">Confirmação de Pedido</div>
+                <div class="highlight-row">
+                  <div>OC: ${escapeHtml(normalized.oc)}</div>
+                  <div>Enviado em: ${formatDate(normalized.sentAt)}</div>
+                  <div>Status: <span class="${statusClass}">${escapeHtml(normalized.status || 'PENDENTE')}</span></div>
+                </div>
+                <div class="summary">
+                  <div><strong>Comprador:</strong> ${escapeHtml(normalized.buyerSelected || '-')}</div>
+                  <div><strong>Fornecedor:</strong> ${escapeHtml(normalized.supplierSelected || '-')}</div>
+                  <div><strong>Qtd total:</strong> ${normalized.qtyTotal || 0}</div>
+                  <div><strong>Valor total:</strong> R$ ${formatCurrency(normalized.valueTotal)}</div>
+                </div>
               </div>
-              <div class="summary">
-                <div><strong>Comprador:</strong> ${escapeHtml(order.buyerSelected || '-')}</div>
-                <div><strong>Fornecedor:</strong> ${escapeHtml(order.supplierSelected || '-')}</div>
-                <div><strong>Qtd total:</strong> ${order.qtyTotal || 0}</div>
-                <div><strong>Valor total:</strong> R$ ${formatCurrency(order.valueTotal)}</div>
+            `;
+
+            card.innerHTML = header;
+            const headerEl = card.querySelector('.card-header');
+            headerEl.appendChild(buildNfSection(normalized, card));
+
+            if (normalized.buyerDetails.length || normalized.supplierDetails.length) {
+              const detailsTable = buildDetailsTable(normalized);
+              card.appendChild(detailsTable);
+            }
+
+            const table = buildItemsTable(normalized, card);
+            card.appendChild(table);
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+
+            const message = document.createElement('div');
+            message.className = 'message';
+
+            const receivedButton = document.createElement('button');
+            receivedButton.className = 'btn btn-primary';
+            receivedButton.textContent = 'Recebido';
+            receivedButton.disabled = normalizeText(normalized.status) === 'RECEBIDO' || !isOrderComplete(normalized);
+            receivedButton.dataset.locked = normalizeText(normalized.status) === 'RECEBIDO' ? 'true' : 'false';
+            receivedButton.addEventListener('click', () => handleReceived(normalized, receivedButton, message));
+
+            const cancelButton = document.createElement('button');
+            cancelButton.className = 'btn btn-secondary';
+            cancelButton.textContent = 'Cancelar pedido';
+            cancelButton.addEventListener('click', () => handleCancel(normalized));
+
+            const groupButton = document.createElement('button');
+            groupButton.className = 'btn btn-secondary';
+            groupButton.textContent = 'Agrupar pedido';
+            groupButton.addEventListener('click', () => alert('Em breve'));
+
+            actions.appendChild(cancelButton);
+            actions.appendChild(groupButton);
+            actions.appendChild(receivedButton);
+
+            card.appendChild(actions);
+            card.appendChild(message);
+            frag.appendChild(card);
+
+            updateOrderButtonStateForCard(card);
+          } catch (err) {
+            console.error('[renderOrders] erro ao renderizar OC:', order && order.oc, err);
+            const fallback = document.createElement('div');
+            fallback.className = 'card';
+            fallback.innerHTML = `
+              <div class="card-header">
+                <div class="card-title">Falha ao renderizar pedido</div>
+                <div class="highlight-row">
+                  <div>OC: ${escapeHtml(String((order && order.oc) || ''))}</div>
+                </div>
+                <div class="message">Erro no console. Este pedido não conseguiu renderizar.</div>
               </div>
-            </div>
-          `;
-
-          card.innerHTML = header;
-          const headerEl = card.querySelector('.card-header');
-          headerEl.appendChild(buildNfSection(order, card));
-
-          if (order.buyerDetails.length || order.supplierDetails.length) {
-            const detailsTable = buildDetailsTable(order);
-            card.appendChild(detailsTable);
+            `;
+            frag.appendChild(fallback);
           }
-
-          const table = buildItemsTable(order);
-          card.appendChild(table);
-
-          const actions = document.createElement('div');
-          actions.className = 'actions';
-
-          const message = document.createElement('div');
-          message.className = 'message';
-
-          const receivedButton = document.createElement('button');
-          receivedButton.className = 'btn btn-primary';
-          receivedButton.textContent = 'Recebido';
-          receivedButton.disabled = order.status === 'RECEBIDO' || !isOrderComplete(order);
-          receivedButton.dataset.locked = order.status === 'RECEBIDO' ? 'true' : 'false';
-          receivedButton.addEventListener('click', () => handleReceived(order, receivedButton, message));
-
-          const cancelButton = document.createElement('button');
-          cancelButton.className = 'btn btn-secondary';
-          cancelButton.textContent = 'Cancelar pedido';
-          cancelButton.addEventListener('click', () => handleCancel(order));
-
-          const groupButton = document.createElement('button');
-          groupButton.className = 'btn btn-secondary';
-          groupButton.textContent = 'Agrupar pedido';
-          groupButton.addEventListener('click', () => alert('Em breve'));
-
-          actions.appendChild(cancelButton);
-          actions.appendChild(groupButton);
-          actions.appendChild(receivedButton);
-
-          card.appendChild(actions);
-          card.appendChild(message);
-          ordersContainer.appendChild(card);
-
-          updateOrderButtonState(order.oc);
         });
+
+        ordersContainer.appendChild(frag);
+        console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
       }
 
       function buildDetailsTable(order) {
@@ -634,7 +667,7 @@
           .updateOrderHeaderFields(order.oc, nfValue, nfFreteValue);
       }
 
-      function buildItemsTable(order) {
+      function buildItemsTable(order, card) {
         const table = document.createElement('table');
         table.className = 'items-table';
         table.innerHTML = `
@@ -654,7 +687,15 @@
         `;
 
         const body = document.createElement('tbody');
-        order.items.forEach((item) => {
+        const items = Array.isArray(order.items) ? order.items : [];
+        if (!items.length) {
+          const row = document.createElement('tr');
+          row.innerHTML = '<td colspan="9" class="muted">Sem itens</td>';
+          body.appendChild(row);
+          table.appendChild(body);
+          return table;
+        }
+        items.forEach((item) => {
           const row = document.createElement('tr');
           row.innerHTML = `
             <td>${escapeHtml(item.code || '')}</td>
@@ -673,9 +714,9 @@
           validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
           labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
 
-          qtyInput.addEventListener('input', () => updateOrderButtonState(order.oc));
-          validityInput.addEventListener('input', () => updateOrderButtonState(order.oc));
-          labelInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+          qtyInput.addEventListener('input', () => updateOrderButtonStateForCard(card));
+          validityInput.addEventListener('input', () => updateOrderButtonStateForCard(card));
+          labelInput.addEventListener('input', () => updateOrderButtonStateForCard(card));
 
           row.appendChild(wrapCell(qtyInput));
           row.appendChild(wrapCell(validityInput));
@@ -719,13 +760,23 @@
         if (!card) {
           return;
         }
+        updateOrderButtonStateForCard(card);
+      }
+
+      function updateOrderButtonStateForCard(card) {
+        if (!card) {
+          return;
+        }
         const inputs = card.querySelectorAll('tbody tr');
         let complete = true;
         inputs.forEach((row) => {
           const fields = row.querySelectorAll('input');
-          const qty = fields[0].value;
-          const validity = fields[1].value;
-          const labels = fields[2].value;
+          if (!fields.length) {
+            return;
+          }
+          const qty = fields[0] ? fields[0].value : '';
+          const validity = fields[1] ? fields[1].value : '';
+          const labels = fields[2] ? fields[2].value : '';
           if (!isPositiveNumber(qty) || !isValidDate(validity) || !isPositiveInteger(labels)) {
             complete = false;
           }
@@ -802,12 +853,13 @@
       }
 
       function renderDetailsList(list) {
-        if (!list || !list.length) {
+        const safeList = asArray(list);
+        if (!safeList.length) {
           return '<span class="muted">Sem detalhes</span>';
         }
         return `
           <ul>
-            ${list.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+            ${safeList.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
           </ul>
         `;
       }
@@ -953,6 +1005,51 @@
           .normalize('NFD')
           .replace(/[\u0300-\u036f]/g, '')
           .replace(/\s+/g, ' ');
+      }
+
+      function asArray(value) {
+        if (Array.isArray(value)) {
+          return value;
+        }
+        if (value === null || value === undefined || value === '') {
+          return [];
+        }
+        return [String(value)];
+      }
+
+      function safeText(value) {
+        return String(value === null || value === undefined ? '' : value);
+      }
+
+      function normalizeOrder_(order) {
+        const normalized = {
+          oc: safeText(order && order.oc).trim(),
+          status: safeText(order && order.status),
+          sentAt: order && order.sentAt,
+          buyerSelected: safeText(order && order.buyerSelected),
+          supplierSelected: safeText(order && order.supplierSelected),
+          qtyTotal: order && order.qtyTotal !== undefined ? order.qtyTotal : 0,
+          valueTotal: order && order.valueTotal !== undefined ? order.valueTotal : 0,
+          nf: safeText(order && order.nf),
+          nfFrete: safeText(order && order.nfFrete),
+          buyerDetails: asArray(order && order.buyerDetails),
+          supplierDetails: asArray(order && order.supplierDetails),
+          items: Array.isArray(order && order.items) ? order.items : [],
+        };
+        normalized.items = normalized.items.map((item) => ({
+          lineNo: item && item.lineNo !== undefined ? item.lineNo : '',
+          code: safeText(item && item.code),
+          item: safeText(item && item.item),
+          unit: safeText(item && item.unit),
+          qty: item && item.qty !== undefined ? item.qty : 0,
+          unitPrice: item && item.unitPrice !== undefined ? item.unitPrice : 0,
+          total: item && item.total !== undefined ? item.total : 0,
+          qtyReceived: item && item.qtyReceived !== undefined ? item.qtyReceived : '',
+          validity: item && item.validity !== undefined ? item.validity : '',
+          labels: item && item.labels !== undefined ? item.labels : '',
+          rowIndex: item && item.rowIndex !== undefined ? item.rowIndex : null,
+        }));
+        return normalized;
       }
 
       function matchesFilter(order, buyerValue, supplierValue) {
