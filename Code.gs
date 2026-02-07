@@ -1065,10 +1065,35 @@ function parseJsonSafe_(value) {
     return [];
   }
   try {
-    return JSON.parse(value);
+    return normalizeDetailsArray_(JSON.parse(value));
   } catch (error) {
     return [String(value)];
   }
+}
+
+function normalizeDetailsArray_(parsed) {
+  if (Array.isArray(parsed)) {
+    return parsed;
+  }
+  if (parsed && typeof parsed === 'object') {
+    return Object.values(parsed);
+  }
+  if (parsed === null || parsed === undefined || parsed === '') {
+    return [];
+  }
+  return [String(parsed)];
+}
+
+function parseOrderDetails_(row, primaryIndex, legacyIndex) {
+  const primaryValue = primaryIndex !== null && primaryIndex !== undefined ? row[primaryIndex] : '';
+  if (primaryValue) {
+    return parseJsonSafe_(primaryValue);
+  }
+  if (legacyIndex !== null && legacyIndex !== undefined) {
+    const legacyValue = row[legacyIndex];
+    return parseJsonSafe_(legacyValue);
+  }
+  return [];
 }
 
 function parseOrderDetails_(row, primaryIndex, legacyIndex) {
