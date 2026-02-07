@@ -267,6 +267,7 @@
         <div>Carregados: <span id="debugLoaded">0</span></div>
         <div>Pendentes: <span id="debugPending">0</span></div>
         <div>No filtro: <span id="debugFiltered">0</span></div>
+        <div>Buyer vazio: <span id="debugMissingBuyer">0</span> | Supplier vazio: <span id="debugMissingSupplier">0</span></div>
         <div>Buyer filtro: <span id="debugBuyer">-</span> | Supplier filtro: <span id="debugSupplier">-</span></div>
       </div>
       <div id="orders"></div>
@@ -297,6 +298,8 @@
       const debugLoaded = document.getElementById('debugLoaded');
       const debugPending = document.getElementById('debugPending');
       const debugFiltered = document.getElementById('debugFiltered');
+      const debugMissingBuyer = document.getElementById('debugMissingBuyer');
+      const debugMissingSupplier = document.getElementById('debugMissingSupplier');
       const debugBuyer = document.getElementById('debugBuyer');
       const debugSupplier = document.getElementById('debugSupplier');
       let ordersCache = [];
@@ -365,8 +368,10 @@
           const status = normalizeText(order.status);
           return !status || status.startsWith('PENDENTE');
         });
+        const missingBuyer = pendingOrders.filter((order) => !String(order.buyerSelected || '').trim()).length;
+        const missingSupplier = pendingOrders.filter((order) => !String(order.supplierSelected || '').trim()).length;
         if (!hasFilter) {
-          updateDebugPanel(pendingOrders.length, 0, buyerValue, supplierValue);
+          updateDebugPanel(pendingOrders.length, 0, missingBuyer, missingSupplier, buyerValue, supplierValue);
           renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
           return;
         }
@@ -377,7 +382,15 @@
             return !status || status.startsWith('PENDENTE');
           })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
-        updateDebugPanel(pendingOrders.length, filtered.length, buyerValue, supplierValue);
+        const notMatching = pendingOrders.filter((order) => !matchesFilter(order, buyerValue, supplierValue));
+        if (notMatching.length) {
+          console.log('Pedidos pendentes fora do filtro (amostra):', notMatching.slice(0, 5).map((order) => ({
+            oc: order.oc,
+            buyerSelected: order.buyerSelected,
+            supplierSelected: order.supplierSelected,
+          })));
+        }
+        updateDebugPanel(pendingOrders.length, filtered.length, missingBuyer, missingSupplier, buyerValue, supplierValue);
         if (!filtered.length) {
           renderEmptyState('Nenhum pedido se adequou ao filtro.');
           return;
@@ -390,13 +403,19 @@
         ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
       }
 
-      function updateDebugPanel(pendingCount, filteredCount, buyerValue, supplierValue) {
+      function updateDebugPanel(pendingCount, filteredCount, missingBuyer, missingSupplier, buyerValue, supplierValue) {
         if (!debugLoaded) {
           return;
         }
         debugLoaded.textContent = ordersCache.length;
         debugPending.textContent = pendingCount;
         debugFiltered.textContent = filteredCount;
+        if (debugMissingBuyer) {
+          debugMissingBuyer.textContent = missingBuyer;
+        }
+        if (debugMissingSupplier) {
+          debugMissingSupplier.textContent = missingSupplier;
+        }
         debugBuyer.textContent = buyerValue || '-';
         debugSupplier.textContent = supplierValue || '-';
       }

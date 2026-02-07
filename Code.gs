@@ -175,20 +175,13 @@ function getOrdersWithItems() {
   const itemsByOc = readItemsByOcFromRange_(itemsRange);
 
   const enriched = orders.map((order) => {
-    const items = itemsByOc[order.oc] || [];
-    const buyerDetailFallback = order.buyerDetails && order.buyerDetails.length ? order.buyerDetails[0] : '';
-    const supplierDetailFallback = order.supplierDetails && order.supplierDetails.length ? order.supplierDetails[0] : '';
-    const fallbackBuyer = order.buyerSelected
-      || (items[0] && items[0].buyerSelected)
-      || buyerDetailFallback
-      || '';
-    const fallbackSupplier = order.supplierSelected
-      || (items[0] && items[0].supplierSelected)
-      || supplierDetailFallback
-      || '';
+    const ocKey = String(order.oc || '').trim();
+    const items = itemsByOc[ocKey] || [];
+    const inferred = inferBuyerSupplier_(order, items);
     return Object.assign({}, order, {
-      buyerSelected: fallbackBuyer,
-      supplierSelected: fallbackSupplier,
+      oc: ocKey,
+      buyerSelected: inferred.buyerSelected,
+      supplierSelected: inferred.supplierSelected,
       items,
     });
   });
@@ -782,7 +775,7 @@ function readOrdersFromRange_(range) {
       return ocValue !== null && ocValue !== undefined && String(ocValue).trim() !== '';
     })
     .map((row) => ({
-      oc: row[indexMap.oc],
+      oc: String(row[indexMap.oc] || '').trim(),
       status: row[indexMap.status],
       sentAt: formatDateValue_(row[indexMap.sentAt]),
       buyerSelected: row[indexMap.buyerSelected],
@@ -800,14 +793,14 @@ function readOrdersFromRange_(range) {
 function readItemsByOcFromRange_(range) {
   const values = range.getValues();
   const indexMap = getItemIndexMap_(range);
-  const legacyIndexMap = getLegacyItemBuyerSupplierIndexes_(range);
+  const legacyIndexMap = getLegacyItemBuyerSupplierIndexes_(range, indexMap);
   return values.reduce((acc, row, index) => {
-    const oc = row[indexMap.oc];
-    if (!oc) {
+    const ocKey = String(row[indexMap.oc] || '').trim();
+    if (!ocKey) {
       return acc;
     }
-    if (!acc[oc]) {
-      acc[oc] = [];
+    if (!acc[ocKey]) {
+      acc[ocKey] = [];
     }
     const rawBuyer = row[indexMap.buyerSelected];
     const rawSupplier = row[indexMap.supplierSelected];
@@ -815,8 +808,8 @@ function readItemsByOcFromRange_(range) {
     const legacySupplier = legacyIndexMap.supplierSelected !== null ? row[legacyIndexMap.supplierSelected] : '';
     const buyerSelected = rawBuyer || legacyBuyer || '';
     const supplierSelected = rawSupplier || legacySupplier || '';
-    acc[oc].push({
-      oc,
+    acc[ocKey].push({
+      oc: ocKey,
       lineNo: row[indexMap.lineNo],
       rowIndex: range.getRow() + index,
       code: row[indexMap.code],
@@ -948,12 +941,14 @@ function clearLegacyOrderDetailColumns_(output, legacyIndexes) {
   });
 }
 
-function getLegacyItemBuyerSupplierIndexes_(range) {
+function getLegacyItemBuyerSupplierIndexes_(range, indexMap) {
   const result = { buyerSelected: null, supplierSelected: null };
+  const usedIndexes = new Set(Object.values(indexMap));
   Object.keys(LEGACY_ITEM_BUYER_SUPPLIER_COLUMNS).forEach((field) => {
     const absCol = colLetterToAbsIndex_(LEGACY_ITEM_BUYER_SUPPLIER_COLUMNS[field]);
     try {
-      result[field] = absToRelIndex0_(absCol, range);
+      const rel0 = absToRelIndex0_(absCol, range);
+      result[field] = usedIndexes.has(rel0) ? null : rel0;
     } catch (error) {
       result[field] = null;
     }
@@ -1007,6 +1002,28 @@ function isNumeric_(value) {
   }
   const numberValue = Number(String(value).replace(',', '.'));
   return !Number.isNaN(numberValue);
+}
+
+function inferBuyerSupplier_(order, items) {
+  const orderBuyer = String(order.buyerSelected || '').trim();
+  const orderSupplier = String(order.supplierSelected || '').trim();
+  if (orderBuyer || orderSupplier) {
+    return { buyerSelected: orderBuyer, supplierSelected: orderSupplier };
+  }
+
+  const itemBuyer = items && items[0] ? String(items[0].buyerSelected || '').trim() : '';
+  const itemSupplier = items && items[0] ? String(items[0].supplierSelected || '').trim() : '';
+  if (itemBuyer || itemSupplier) {
+    return { buyerSelected: itemBuyer, supplierSelected: itemSupplier };
+  }
+
+  const detailBuyer = order.buyerDetails && order.buyerDetails.length
+    ? String(order.buyerDetails[0] || '').trim()
+    : '';
+  const detailSupplier = order.supplierDetails && order.supplierDetails.length
+    ? String(order.supplierDetails[0] || '').trim()
+    : '';
+  return { buyerSelected: detailBuyer, supplierSelected: detailSupplier };
 }
 
 function parseNumber_(value) {
@@ -1082,18 +1099,6 @@ function normalizeDetailsArray_(parsed) {
     return [];
   }
   return [String(parsed)];
-}
-
-function parseOrderDetails_(row, primaryIndex, legacyIndex) {
-  const primaryValue = primaryIndex !== null && primaryIndex !== undefined ? row[primaryIndex] : '';
-  if (primaryValue) {
-    return parseJsonSafe_(primaryValue);
-  }
-  if (legacyIndex !== null && legacyIndex !== undefined) {
-    const legacyValue = row[legacyIndex];
-    return parseJsonSafe_(legacyValue);
-  }
-  return [];
 }
 
 function parseOrderDetails_(row, primaryIndex, legacyIndex) {
