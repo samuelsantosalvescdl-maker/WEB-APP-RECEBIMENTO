@@ -651,51 +651,6 @@ function sendToWebAppC_(order, items, pdfResult) {
   if (!parsed) {
     throw new Error(buildWebAppCError_(status, null, text));
   }
-  const info = {
-    scriptId: parsed.scriptId || '',
-    expectedKeyLast3: parsed.expectedKeyLast3 || '',
-  };
-  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
-  return info;
-}
-
-function buildWebAppCError_(status, message, bodyText) {
-  const snippet = String(bodyText || '').slice(0, 200);
-  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
-  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
-}
-
-function testWebAppCConnection_() {
-  const url = WEBAPP_C_URL
-    + (WEBAPP_C_URL.includes('?') ? '&' : '?')
-    + 'ping=1';
-  const response = UrlFetchApp.fetch(url, {
-    method: 'get',
-    muteHttpExceptions: true,
-  });
-  const status = response.getResponseCode();
-  const text = response.getContentText();
-  let parsed = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    parsed = null;
-  }
-  if (!parsed || parsed.ok !== true) {
-    throw new Error(buildWebAppCError_(status, parsed && parsed.error, text));
-  }
-  const info = {
-    scriptId: parsed.scriptId || '',
-    expectedKeyLast3: parsed.expectedKeyLast3 || '',
-  };
-  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
-  return info;
-}
-
-function buildWebAppCError_(status, message, bodyText) {
-  const snippet = String(bodyText || '').slice(0, 200);
-  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
-  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
 }
 
 function testWebAppCConnection_() {
@@ -1176,6 +1131,29 @@ function parseGroupOcs_(groupOcs) {
     .filter((entry) => entry);
 }
 
+function compareOc_(first, second) {
+  const normFirst = String(first || '').trim();
+  const normSecond = String(second || '').trim();
+  const digitsFirst = normFirst.replace(/\D+/g, '') || normFirst;
+  const digitsSecond = normSecond.replace(/\D+/g, '') || normSecond;
+  try {
+    const bigFirst = BigInt(digitsFirst);
+    const bigSecond = BigInt(digitsSecond);
+    if (bigFirst < bigSecond) {
+      return -1;
+    }
+    if (bigFirst > bigSecond) {
+      return 1;
+    }
+    return 0;
+  } catch (error) {
+    if (digitsFirst.length !== digitsSecond.length) {
+      return digitsFirst.length - digitsSecond.length;
+    }
+    return digitsFirst.localeCompare(digitsSecond);
+  }
+}
+
 function groupOrders(ocList) {
   if (!Array.isArray(ocList) || ocList.length < 2) {
     throw new Error('Selecione ao menos dois pedidos para agrupar.');
@@ -1213,7 +1191,7 @@ function groupOrders(ocList) {
     throw new Error('Só é possível agrupar pedidos pendentes.');
   }
 
-  const ocPrimary = ocKeys[0];
+  const ocPrimary = ocKeys.slice().sort(compareOc_)[0];
   const primaryOrder = orderMap.get(ocPrimary);
   const itemsByOc = readItemsByOcFromRange_(itemsRange);
   const primaryItems = itemsByOc[ocPrimary] || [];
@@ -1233,19 +1211,8 @@ function groupOrders(ocList) {
     throw new Error('Os pedidos selecionados devem ter o mesmo fornecedor.');
   }
 
-  const groupOcs = ocKeys.join(', ');
-  const groupSentAts = allOrders.map((order) => {
-    if (order.sentAt instanceof Date) {
-      return formatDateTime_(order.sentAt);
-    }
-    return order.sentAt || '';
-  }).join(', ');
-
   const qtyTotalSum = allOrders.reduce((acc, order) => acc + Number(order.qtyTotal || 0), 0);
   const valueTotalSum = allOrders.reduce((acc, order) => acc + Number(order.valueTotal || 0), 0);
-
-  const nf = primaryOrder.nf || allOrders.map((order) => order.nf).find((value) => value) || '';
-  const nfFrete = primaryOrder.nfFrete || allOrders.map((order) => order.nfFrete).find((value) => value) || '';
 
   const ordersSheet = ordersRange.getSheet();
   const ordersStartCol = ordersRange.getColumn();
@@ -1258,19 +1225,13 @@ function groupOrders(ocList) {
 
   ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.qtyTotal).setValue(qtyTotalSum);
   ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.valueTotal).setValue(valueTotalSum);
-  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.groupOcs).setValue(groupOcs);
-  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.groupSentAts).setValue(groupSentAts);
-  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.nf).setValue(nf || '');
-  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.nfFrete).setValue(nfFrete || '');
-  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.buyerSelected).setValue(inferredPrimary.buyerSelected || '');
-  ordersSheet.getRange(primaryRow, ordersStartCol + orderIndexMap.supplierSelected).setValue(inferredPrimary.supplierSelected || '');
 
-  ocKeys.slice(1).forEach((oc) => {
+  const ocSecondaryKeys = ocKeys.filter((oc) => oc !== ocPrimary);
+  const width = ordersRange.getNumColumns();
+  ocSecondaryKeys.forEach((oc) => {
     const row = findOrderRowByOcInRange_(ordersRange, oc);
     if (row) {
-      ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue(`AGRUPADO EM ${ocPrimary}`);
-      ordersSheet.getRange(row, ordersStartCol + orderIndexMap.groupOcs).setValue(groupOcs);
-      ordersSheet.getRange(row, ordersStartCol + orderIndexMap.groupSentAts).setValue(groupSentAts);
+      ordersSheet.getRange(row, ordersStartCol, 1, width).clearContent();
     }
   });
 
@@ -1309,7 +1270,6 @@ function groupOrders(ocList) {
   return {
     ok: true,
     ocPrimary,
-    groupOcs,
     mergedCountItems: primaryItemIndexes.length,
     updatedOrders: ocKeys,
   };

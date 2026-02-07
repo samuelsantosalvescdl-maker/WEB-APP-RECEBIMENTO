@@ -438,7 +438,12 @@
         google.script.run
           .withSuccessHandler((orders) => {
             ordersCache = orders || [];
-            selectedGroupOcs.clear();
+            const existing = new Set(ordersCache.map((order) => String((order && order.oc) || '').trim()));
+            for (const oc of Array.from(selectedGroupOcs)) {
+              if (!existing.has(oc)) {
+                selectedGroupOcs.delete(oc);
+              }
+            }
             console.log('[refreshOrders] total:', (ordersCache || []).length,
               'ocs:', (ordersCache || []).map((order) => order && order.oc));
             renderFilteredOrders();
@@ -542,13 +547,7 @@
             cancelButton.textContent = 'Cancelar pedido';
             cancelButton.addEventListener('click', () => handleCancel(normalized));
 
-            const groupButton = document.createElement('button');
-            groupButton.className = 'btn btn-secondary';
-            groupButton.textContent = 'Agrupar pedido';
-            groupButton.addEventListener('click', () => alert('Em breve'));
-
             actions.appendChild(cancelButton);
-            actions.appendChild(groupButton);
             actions.appendChild(receivedButton);
 
             card.appendChild(actions);
@@ -1173,6 +1172,7 @@
         google.script.run
           .withSuccessHandler((response) => {
             alert(`Pedidos agrupados em ${response.ocPrimary}.`);
+            selectedGroupOcs.clear();
             refreshOrders();
           })
           .withFailureHandler(showError)
