@@ -1096,6 +1096,18 @@ function parseOrderDetails_(row, primaryIndex, legacyIndex) {
   return [];
 }
 
+function parseOrderDetails_(row, primaryIndex, legacyIndex) {
+  const primaryValue = primaryIndex !== null && primaryIndex !== undefined ? row[primaryIndex] : '';
+  if (primaryValue) {
+    return parseJsonSafe_(primaryValue);
+  }
+  if (legacyIndex !== null && legacyIndex !== undefined) {
+    const legacyValue = row[legacyIndex];
+    return parseJsonSafe_(legacyValue);
+  }
+  return [];
+}
+
 function formatDateValue_(value) {
   if (value instanceof Date) {
     return value.toISOString();
