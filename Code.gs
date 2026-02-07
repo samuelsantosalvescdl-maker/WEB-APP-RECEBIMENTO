@@ -39,6 +39,11 @@ const ITEM_COLUMN_LETTERS = {
   receivedAt: 'D',
 };
 
+const LEGACY_ITEM_BUYER_SUPPLIER_COLUMNS = {
+  buyerSelected: 'L',
+  supplierSelected: 'M',
+};
+
 const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
 const LABELS_FOLDER_ID = '1UzyIn1fsiVIatfgQQK-GyGIeJI4Z-AFs';
 const WEBAPP_C_URL = 'https://script.google.com/macros/s/AKfycbyohvLNZUxc1Kdyg0N5dr4lxgA9pXMbzEUwy2dLWF_P5IHfeEpyPnkjnKGAvOQfk1Y3/exec';
@@ -770,6 +775,7 @@ function findItemRowInRange_(range, oc, lineNo) {
 function readOrdersFromRange_(range) {
   const values = range.getValues();
   const indexMap = getOrderIndexMap_(range);
+  const legacyDetails = getLegacyOrderDetailIndexes_(range, indexMap);
   return values
     .filter((row) => {
       const ocValue = row[indexMap.oc];
@@ -785,8 +791,8 @@ function readOrdersFromRange_(range) {
       valueTotal: row[indexMap.valueTotal],
       nf: row[indexMap.nf],
       nfFrete: row[indexMap.nfFrete],
-      buyerDetails: parseJsonSafe_(row[indexMap.buyerDetailsJson]),
-      supplierDetails: parseJsonSafe_(row[indexMap.supplierDetailsJson]),
+      buyerDetails: parseOrderDetails_(row, indexMap.buyerDetailsJson, legacyDetails[0]),
+      supplierDetails: parseOrderDetails_(row, indexMap.supplierDetailsJson, legacyDetails[1]),
       receivedAt: formatDateValue_(row[indexMap.receivedAt]),
     }));
 }
@@ -794,6 +800,7 @@ function readOrdersFromRange_(range) {
 function readItemsByOcFromRange_(range) {
   const values = range.getValues();
   const indexMap = getItemIndexMap_(range);
+  const legacyIndexMap = getLegacyItemBuyerSupplierIndexes_(range);
   return values.reduce((acc, row, index) => {
     const oc = row[indexMap.oc];
     if (!oc) {
@@ -802,6 +809,12 @@ function readItemsByOcFromRange_(range) {
     if (!acc[oc]) {
       acc[oc] = [];
     }
+    const rawBuyer = row[indexMap.buyerSelected];
+    const rawSupplier = row[indexMap.supplierSelected];
+    const legacyBuyer = legacyIndexMap.buyerSelected !== null ? row[legacyIndexMap.buyerSelected] : '';
+    const legacySupplier = legacyIndexMap.supplierSelected !== null ? row[legacyIndexMap.supplierSelected] : '';
+    const buyerSelected = rawBuyer || legacyBuyer || '';
+    const supplierSelected = rawSupplier || legacySupplier || '';
     acc[oc].push({
       oc,
       lineNo: row[indexMap.lineNo],
@@ -815,8 +828,8 @@ function readItemsByOcFromRange_(range) {
       qtyReceived: row[indexMap.qtyReceived],
       validity: formatDateOnly_(row[indexMap.validity]),
       labels: row[indexMap.labels],
-      buyerSelected: row[indexMap.buyerSelected],
-      supplierSelected: row[indexMap.supplierSelected],
+      buyerSelected,
+      supplierSelected,
       receivedAt: row[indexMap.receivedAt],
     });
     return acc;
@@ -935,6 +948,19 @@ function clearLegacyOrderDetailColumns_(output, legacyIndexes) {
   });
 }
 
+function getLegacyItemBuyerSupplierIndexes_(range) {
+  const result = { buyerSelected: null, supplierSelected: null };
+  Object.keys(LEGACY_ITEM_BUYER_SUPPLIER_COLUMNS).forEach((field) => {
+    const absCol = colLetterToAbsIndex_(LEGACY_ITEM_BUYER_SUPPLIER_COLUMNS[field]);
+    try {
+      result[field] = absToRelIndex0_(absCol, range);
+    } catch (error) {
+      result[field] = null;
+    }
+  });
+  return result;
+}
+
 function mapItemRowToRange_(row, totalCols, indexMap) {
   const output = Array(totalCols).fill('');
   output[indexMap.oc] = row.oc;
@@ -1043,6 +1069,18 @@ function parseJsonSafe_(value) {
   } catch (error) {
     return [];
   }
+}
+
+function parseOrderDetails_(row, primaryIndex, legacyIndex) {
+  const primaryValue = primaryIndex !== null && primaryIndex !== undefined ? row[primaryIndex] : '';
+  if (primaryValue) {
+    return parseJsonSafe_(primaryValue);
+  }
+  if (legacyIndex !== null && legacyIndex !== undefined) {
+    const legacyValue = row[legacyIndex];
+    return parseJsonSafe_(legacyValue);
+  }
+  return [];
 }
 
 function formatDateValue_(value) {
