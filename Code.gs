@@ -250,6 +250,26 @@ function updateOrderHeaderFields(oc, nfValue, nfFreteValue) {
   return { ok: true };
 }
 
+function updateOrderCommentField(oc, commentValue) {
+  if (!oc) {
+    throw new Error('OC inválida.');
+  }
+
+  const spreadsheet = getSpreadsheet_();
+  const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+  const row = findOrderRowByOcInRange_(ordersRange, oc);
+  if (!row) {
+    throw new Error('Pedido não encontrado.');
+  }
+
+  const indexMap = getOrderIndexMap_(ordersRange);
+  const sheet = ordersRange.getSheet();
+  const startCol = ordersRange.getColumn();
+  sheet.getRange(row, startCol + indexMap.comment, 1, 1).setValue(String(commentValue || ''));
+
+  return { ok: true };
+}
+
 function receiveOrder(oc, labelWidthCm, labelHeightCm) {
   if (!oc) {
     throw new Error('OC inválida.');
@@ -746,6 +766,7 @@ function buildOrderRow_(payload, normalized) {
     supplierDetailsJson: JSON.stringify(normalized.supplierDetails || []),
     groupOcs: '',
     groupSentAts: '',
+    comment: '',
     receivedAt: '',
   };
 }
@@ -815,6 +836,7 @@ function readOrdersFromRange_(range) {
       supplierDetails: parseJsonSafe_(row[indexMap.supplierDetailsJson]),
       groupOcs: row[indexMap.groupOcs] || '',
       groupSentAts: row[indexMap.groupSentAts] || '',
+      comment: row[indexMap.comment] || '',
       receivedAt: formatDateValue_(row[indexMap.receivedAt]),
     }));
 }
@@ -940,6 +962,7 @@ function mapOrderRowToRange_(row, totalCols, indexMap) {
   output[indexMap.supplierDetailsJson] = row.supplierDetailsJson;
   output[indexMap.groupOcs] = row.groupOcs;
   output[indexMap.groupSentAts] = row.groupSentAts;
+  output[indexMap.comment] = row.comment || '';
   output[indexMap.receivedAt] = row.receivedAt;
   return output;
 }

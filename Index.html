@@ -500,6 +500,29 @@
             card.innerHTML = header;
             const headerEl = card.querySelector('.card-header');
             headerEl.appendChild(buildNfSection(normalized, card));
+            const commentWrap = document.createElement('div');
+            commentWrap.className = 'nf-group';
+            const commentLabel = document.createElement('label');
+            commentLabel.textContent = 'Observação';
+            const commentInput = document.createElement('textarea');
+            commentInput.placeholder = 'Digite uma observação...';
+            commentInput.rows = 3;
+            commentInput.value = normalized.comment || '';
+            commentInput.addEventListener('blur', () => {
+              const newValue = commentInput.value || '';
+              google.script.run
+                .withSuccessHandler(() => {
+                  normalized.comment = newValue;
+                })
+                .withFailureHandler(showError)
+                .updateOrderCommentField(normalized.oc, newValue);
+            });
+            if (!normalizeText(normalized.status).startsWith('PENDENTE')) {
+              commentInput.disabled = true;
+            }
+            commentWrap.appendChild(commentLabel);
+            commentWrap.appendChild(commentInput);
+            headerEl.appendChild(commentWrap);
             if (normalizeText(normalized.status).startsWith('PENDENTE')) {
               const selectRow = document.createElement('div');
               const selectInput = document.createElement('input');
@@ -1129,6 +1152,7 @@
           nfFrete: safeText(order && order.nfFrete),
           groupOcs: safeText(order && order.groupOcs),
           groupSentAts: safeText(order && order.groupSentAts),
+          comment: safeText(order && order.comment),
           buyerDetails: asArray(order && order.buyerDetails),
           supplierDetails: asArray(order && order.supplierDetails),
           items: Array.isArray(order && order.items) ? order.items : [],
