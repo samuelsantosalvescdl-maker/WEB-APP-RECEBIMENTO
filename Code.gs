@@ -1067,7 +1067,7 @@ function parseJsonSafe_(value) {
   try {
     return JSON.parse(value);
   } catch (error) {
-    return [];
+    return [String(value)];
   }
 }
 
