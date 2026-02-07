@@ -97,6 +97,40 @@
         font-size: 14px;
         margin-top: 8px;
       }
+      .nf-section {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: 12px;
+      }
+      .nf-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 220px;
+      }
+      .nf-inputs {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .nf-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .nf-row input {
+        flex: 1;
+      }
+      .nf-add {
+        border: 1px solid #cbd5e0;
+        background: #edf2f7;
+        color: #2d3748;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
       .details-table {
         width: 100%;
         border-collapse: collapse;
@@ -228,6 +262,14 @@
       </div>
     </div>
     <div class="container">
+      <div id="debugPanel" class="empty-state" style="margin-bottom: 16px;">
+        <strong>DEBUG</strong>
+        <div>Carregados: <span id="debugLoaded">0</span></div>
+        <div>Pendentes: <span id="debugPending">0</span></div>
+        <div>No filtro: <span id="debugFiltered">0</span></div>
+        <div>Buyer vazio: <span id="debugMissingBuyer">0</span> | Supplier vazio: <span id="debugMissingSupplier">0</span></div>
+        <div>Buyer filtro: <span id="debugBuyer">-</span> | Supplier filtro: <span id="debugSupplier">-</span></div>
+      </div>
       <div id="orders"></div>
     </div>
     <div id="labelsModal" class="modal-backdrop">
@@ -253,17 +295,18 @@
       const pdfLink = document.getElementById('pdfLink');
       const printPdf = document.getElementById('printPdf');
       const closeModal = document.getElementById('closeModal');
+      const debugLoaded = document.getElementById('debugLoaded');
+      const debugPending = document.getElementById('debugPending');
+      const debugFiltered = document.getElementById('debugFiltered');
+      const debugMissingBuyer = document.getElementById('debugMissingBuyer');
+      const debugMissingSupplier = document.getElementById('debugMissingSupplier');
+      const debugBuyer = document.getElementById('debugBuyer');
+      const debugSupplier = document.getElementById('debugSupplier');
       let ordersCache = [];
 
       function init() {
         loadFilterOptions();
-        google.script.run
-          .withSuccessHandler((orders) => {
-            ordersCache = orders || [];
-            renderFilteredOrders();
-          })
-          .withFailureHandler(showError)
-          .getOrdersWithItems();
+        refreshOrders();
 
         buyerFilter.addEventListener('change', renderFilteredOrders);
         supplierFilter.addEventListener('change', renderFilteredOrders);
@@ -281,6 +324,8 @@
             window.open(pdfLink.href, '_blank', 'noopener');
           });
         }
+
+        setInterval(refreshOrders, 15000);
       }
 
       function loadFilterOptions() {
@@ -319,14 +364,33 @@
         const buyerValue = buyerFilter.value;
         const supplierValue = supplierFilter.value;
         const hasFilter = buyerValue || supplierValue;
+        const pendingOrders = ordersCache.filter((order) => {
+          const status = normalizeText(order.status);
+          return !status || status.startsWith('PENDENTE');
+        });
+        const missingBuyer = pendingOrders.filter((order) => !String(order.buyerSelected || '').trim()).length;
+        const missingSupplier = pendingOrders.filter((order) => !String(order.supplierSelected || '').trim()).length;
         if (!hasFilter) {
+          updateDebugPanel(pendingOrders.length, 0, missingBuyer, missingSupplier, buyerValue, supplierValue);
           renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
           return;
         }
 
         const filtered = ordersCache
-          .filter((order) => order.status !== 'RECEBIDO')
+          .filter((order) => {
+            const status = normalizeText(order.status);
+            return !status || status.startsWith('PENDENTE');
+          })
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
+        const notMatching = pendingOrders.filter((order) => !matchesFilter(order, buyerValue, supplierValue));
+        if (notMatching.length) {
+          console.log('Pedidos pendentes fora do filtro (amostra):', notMatching.slice(0, 5).map((order) => ({
+            oc: order.oc,
+            buyerSelected: order.buyerSelected,
+            supplierSelected: order.supplierSelected,
+          })));
+        }
+        updateDebugPanel(pendingOrders.length, filtered.length, missingBuyer, missingSupplier, buyerValue, supplierValue);
         if (!filtered.length) {
           renderEmptyState('Nenhum pedido se adequou ao filtro.');
           return;
@@ -337,6 +401,33 @@
 
       function renderEmptyState(message) {
         ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+      }
+
+      function updateDebugPanel(pendingCount, filteredCount, missingBuyer, missingSupplier, buyerValue, supplierValue) {
+        if (!debugLoaded) {
+          return;
+        }
+        debugLoaded.textContent = ordersCache.length;
+        debugPending.textContent = pendingCount;
+        debugFiltered.textContent = filteredCount;
+        if (debugMissingBuyer) {
+          debugMissingBuyer.textContent = missingBuyer;
+        }
+        if (debugMissingSupplier) {
+          debugMissingSupplier.textContent = missingSupplier;
+        }
+        debugBuyer.textContent = buyerValue || '-';
+        debugSupplier.textContent = supplierValue || '-';
+      }
+
+      function refreshOrders() {
+        google.script.run
+          .withSuccessHandler((orders) => {
+            ordersCache = orders || [];
+            renderFilteredOrders();
+          })
+          .withFailureHandler(showError)
+          .getOrdersWithItems();
       }
 
       function renderOrders(orders) {
@@ -351,9 +442,11 @@
           card.className = 'card';
           card.dataset.oc = order.oc;
 
-          const statusClass = order.status === 'RECEBIDO'
+          const statusText = String(order.status || '');
+          const statusNormalized = statusText.trim().toLowerCase();
+          const statusClass = statusNormalized === 'recebido'
             ? 'status'
-            : order.status && order.status.startsWith('CANCEL')
+            : statusNormalized.includes('cancel')
               ? 'status cancel'
               : 'status pending';
 
@@ -375,6 +468,8 @@
           `;
 
           card.innerHTML = header;
+          const headerEl = card.querySelector('.card-header');
+          headerEl.appendChild(buildNfSection(order, card));
 
           if (order.buyerDetails.length || order.supplierDetails.length) {
             const detailsTable = buildDetailsTable(order);
@@ -402,7 +497,13 @@
           cancelButton.textContent = 'Cancelar pedido';
           cancelButton.addEventListener('click', () => handleCancel(order));
 
+          const groupButton = document.createElement('button');
+          groupButton.className = 'btn btn-secondary';
+          groupButton.textContent = 'Agrupar pedido';
+          groupButton.addEventListener('click', () => alert('Em breve'));
+
           actions.appendChild(cancelButton);
+          actions.appendChild(groupButton);
           actions.appendChild(receivedButton);
 
           card.appendChild(actions);
@@ -433,6 +534,104 @@
         `;
         wrapper.appendChild(table);
         return wrapper;
+      }
+
+      function buildNfSection(order, card) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'nf-section';
+
+        const nfGroup = document.createElement('div');
+        nfGroup.className = 'nf-group';
+        const nfLabel = document.createElement('label');
+        nfLabel.textContent = 'NF';
+        const nfInputs = document.createElement('div');
+        nfInputs.className = 'nf-inputs';
+
+        const nfValues = splitNfValues(order.nf);
+        nfValues.forEach((value) => {
+          nfInputs.appendChild(buildNfInputRow(value, order, card));
+        });
+
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.className = 'nf-add';
+        addButton.textContent = '+';
+        addButton.addEventListener('click', () => {
+          const row = buildNfInputRow('', order, card);
+          nfInputs.appendChild(row);
+          const input = row.querySelector('input');
+          if (input) {
+            input.focus();
+          }
+        });
+
+        nfGroup.appendChild(nfLabel);
+        nfGroup.appendChild(nfInputs);
+        nfGroup.appendChild(addButton);
+
+        const nfFreteGroup = document.createElement('div');
+        nfFreteGroup.className = 'nf-group';
+        const nfFreteLabel = document.createElement('label');
+        nfFreteLabel.textContent = 'NF Frete';
+        const nfFreteInput = document.createElement('input');
+        nfFreteInput.type = 'text';
+        nfFreteInput.className = 'nf-frete-input';
+        nfFreteInput.placeholder = 'NF Frete';
+        if (order.nfFrete !== null && order.nfFrete !== undefined) {
+          nfFreteInput.value = order.nfFrete;
+        }
+        nfFreteInput.addEventListener('blur', () => persistNfFields(order, card));
+
+        nfFreteGroup.appendChild(nfFreteLabel);
+        nfFreteGroup.appendChild(nfFreteInput);
+
+        wrapper.appendChild(nfGroup);
+        wrapper.appendChild(nfFreteGroup);
+        return wrapper;
+      }
+
+      function buildNfInputRow(value, order, card) {
+        const row = document.createElement('div');
+        row.className = 'nf-row';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'nf-input';
+        input.placeholder = 'NF';
+        if (value !== null && value !== undefined) {
+          input.value = value;
+        }
+        input.addEventListener('blur', () => persistNfFields(order, card));
+        row.appendChild(input);
+        return row;
+      }
+
+      function splitNfValues(value) {
+        if (!value) {
+          return [''];
+        }
+        const parts = String(value)
+          .split(',')
+          .map((part) => part.trim())
+          .filter((part) => part !== '');
+        return parts.length ? parts : [''];
+      }
+
+      function persistNfFields(order, card) {
+        const nfInputs = card.querySelectorAll('.nf-input');
+        const nfValues = Array.from(nfInputs)
+          .map((input) => input.value.trim())
+          .filter((value) => value !== '');
+        const nfValue = nfValues.join(', ');
+        const nfFreteInput = card.querySelector('.nf-frete-input');
+        const nfFreteValue = nfFreteInput ? nfFreteInput.value.trim() : '';
+
+        google.script.run
+          .withSuccessHandler(() => {
+            order.nf = nfValue;
+            order.nfFrete = nfFreteValue;
+          })
+          .withFailureHandler(showError)
+          .updateOrderHeaderFields(order.oc, nfValue, nfFreteValue);
       }
 
       function buildItemsTable(order) {
@@ -467,7 +666,7 @@
           `;
 
           const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
-          const validityInput = buildInput('text', item.validity, 'Validade dd/MM/yyyy');
+          const validityInput = buildInput('text', normalizeDateInput(item.validity), 'Validade dd/MM/yyyy');
           const labelInput = buildInput('number', item.labels, 'Etiquetas');
 
           qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
@@ -506,9 +705,9 @@
       }
 
       function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) {
-        const qtyValue = qtyInput.value === '' ? '' : Number(qtyInput.value);
+        const qtyValue = qtyInput.value === '' ? '' : parseNumber(qtyInput.value);
         const validityValue = validityInput.value;
-        const labelsValue = labelInput.value === '' ? '' : Number(labelInput.value);
+        const labelsValue = labelInput.value === '' ? '' : parseNumber(labelInput.value);
 
         google.script.run
           .withFailureHandler(showError)
@@ -594,8 +793,9 @@
 
         google.script.run
           .withSuccessHandler(() => {
-            alert('Pedido marcado para cancelamento.');
-            renderFilteredOrders();
+            alert('Pedido cancelado.');
+            removeOrderFromCache(order.oc);
+            removeOrderCard(order.oc);
           })
           .withFailureHandler(showError)
           .cancelOrderStub(order.oc);
@@ -637,8 +837,41 @@
         if (!value) {
           return false;
         }
-        const normalized = String(value).trim().replace(/[-.]/g, '/');
-        return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized);
+        if (value instanceof Date) {
+          return !Number.isNaN(value.getTime());
+        }
+        const normalized = String(value).trim();
+        if (!normalized) {
+          return false;
+        }
+        const normalizedSlash = normalized.replace(/[-.]/g, '/');
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(normalizedSlash)) {
+          return true;
+        }
+        const parsed = new Date(normalized);
+        return !Number.isNaN(parsed.getTime());
+      }
+
+      function normalizeDateInput(value) {
+        if (!value) {
+          return '';
+        }
+        if (value instanceof Date) {
+          return value.toLocaleDateString('pt-BR');
+        }
+        const text = String(value).trim();
+        if (!text) {
+          return '';
+        }
+        const normalized = text.replace(/[-.]/g, '/');
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(normalized)) {
+          return normalized;
+        }
+        const parsed = new Date(text);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed.toLocaleDateString('pt-BR');
+        }
+        return text;
       }
 
       function openLabelsModal(url) {
@@ -724,12 +957,33 @@
 
       function matchesFilter(order, buyerValue, supplierValue) {
         const buyerMatch = buyerValue
-          ? normalizeText(order.buyerSelected) === normalizeText(buyerValue)
+          ? matchesAnyField_(buyerValue, order.buyerSelected, order.buyerDetails)
           : true;
         const supplierMatch = supplierValue
-          ? normalizeText(order.supplierSelected) === normalizeText(supplierValue)
+          ? matchesAnyField_(supplierValue, order.supplierSelected, order.supplierDetails)
           : true;
         return buyerMatch && supplierMatch;
+      }
+
+      function matchesNormalized_(orderValue, filterValue) {
+        const orderText = normalizeText(orderValue);
+        const filterText = normalizeText(filterValue);
+        if (!orderText || !filterText) {
+          return false;
+        }
+        return orderText === filterText
+          || orderText.includes(filterText)
+          || filterText.includes(orderText);
+      }
+
+      function matchesAnyField_(filterValue, primaryValue, detailsList) {
+        if (matchesNormalized_(primaryValue, filterValue)) {
+          return true;
+        }
+        if (!detailsList || !detailsList.length) {
+          return false;
+        }
+        return detailsList.some((entry) => matchesNormalized_(entry, filterValue));
       }
 
       window.addEventListener('load', init);
