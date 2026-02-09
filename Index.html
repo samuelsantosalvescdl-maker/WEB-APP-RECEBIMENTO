@@ -283,6 +283,7 @@
           Acessar PDF:
           <a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a>
         </p>
+        <p id="pdfMessage" class="muted"></p>
         <div class="modal-actions">
           <button id="closeModal" class="btn btn-primary" type="button">Ok</button>
         </div>
@@ -298,6 +299,7 @@
       const groupSelectedButton = document.getElementById('groupSelected');
       const labelsModal = document.getElementById('labelsModal');
       const pdfLink = document.getElementById('pdfLink');
+      const pdfMessage = document.getElementById('pdfMessage');
       const printPdf = document.getElementById('printPdf');
       const closeModal = document.getElementById('closeModal');
       const debugLoaded = document.getElementById('debugLoaded');
@@ -309,6 +311,7 @@
       const debugSupplier = document.getElementById('debugSupplier');
       let ordersCache = [];
       const selectedGroupOcs = new Set();
+      let lastUserEditAt = 0;
 
       function init() {
         loadFilterOptions();
@@ -316,6 +319,10 @@
 
         buyerFilter.addEventListener('change', renderFilteredOrders);
         supplierFilter.addEventListener('change', renderFilteredOrders);
+        labelWidthInput.addEventListener('input', markUserEdit);
+        labelWidthInput.addEventListener('focus', markUserEdit);
+        labelHeightInput.addEventListener('input', markUserEdit);
+        labelHeightInput.addEventListener('focus', markUserEdit);
         if (groupSelectedButton) {
           groupSelectedButton.addEventListener('click', handleGroupSelected);
         }
@@ -434,7 +441,13 @@
         debugSupplier.textContent = supplierValue || '-';
       }
 
-      function refreshOrders() {
+      function refreshOrders(force) {
+        if (!force && Date.now() - lastUserEditAt < 5000) {
+          return; // Evita refresh durante edição recente.
+        }
+        if (!force && ordersContainer.contains(document.activeElement)) {
+          return; // Evita refresh enquanto usuário edita campos.
+        }
         google.script.run
           .withSuccessHandler((orders) => {
             ordersCache = orders || [];
@@ -508,15 +521,17 @@
             commentInput.placeholder = 'Digite uma observação...';
             commentInput.rows = 3;
             commentInput.value = normalized.comment || '';
+            const persistCommentDebounced = debounce(() => {
+              persistOrderComment(normalized, commentInput.value || '');
+            }, 500);
             commentInput.addEventListener('blur', () => {
-              const newValue = commentInput.value || '';
-              google.script.run
-                .withSuccessHandler(() => {
-                  normalized.comment = newValue;
-                })
-                .withFailureHandler(showError)
-                .updateOrderCommentField(normalized.oc, newValue);
+              persistOrderComment(normalized, commentInput.value || '');
             });
+            commentInput.addEventListener('input', () => {
+              markUserEdit();
+              persistCommentDebounced();
+            });
+            commentInput.addEventListener('focus', markUserEdit);
             if (!normalizeText(normalized.status).startsWith('PENDENTE')) {
               commentInput.disabled = true;
             }
@@ -600,6 +615,20 @@
         console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
       }
 
+      function markUserEdit() {
+        lastUserEditAt = Date.now();
+      }
+
+      function debounce(fn, delayMs) {
+        let timer = null;
+        return (...args) => {
+          if (timer) {
+            clearTimeout(timer);
+          }
+          timer = setTimeout(() => fn(...args), delayMs);
+        };
+      }
+
       function buildDetailsTable(order) {
         const wrapper = document.createElement('div');
         const table = document.createElement('table');
@@ -656,6 +685,7 @@
           addButton.disabled = true;
         }
         addButton.addEventListener('click', () => {
+          markUserEdit();
           const row = buildNfInputRow('', order, card);
           nfInputs.appendChild(row);
           const input = row.querySelector('input');
@@ -684,6 +714,11 @@
           nfFreteInput.disabled = true;
         }
         nfFreteInput.addEventListener('blur', () => persistNfFields(order, card));
+        nfFreteInput.addEventListener('input', () => {
+          markUserEdit();
+          persistNfFieldsDebounced(order, card);
+        });
+        nfFreteInput.addEventListener('focus', markUserEdit);
 
         const nfFreteToggle = document.createElement('label');
         nfFreteToggle.style.display = 'flex';
@@ -699,10 +734,33 @@
         nfFreteGroup.appendChild(nfFreteInput);
         nfFreteGroup.appendChild(nfFreteToggle);
 
+        const boletoGroup = document.createElement('div');
+        boletoGroup.className = 'nf-group';
+        const boletoLabel = document.createElement('label');
+        boletoLabel.textContent = 'Boleto';
+        const boletoSelect = document.createElement('select');
+        boletoSelect.innerHTML = `
+          <option value="">Selecione...</option>
+          <option value="VEIO">VEIO</option>
+          <option value="NÃO VEIO">NÃO VEIO</option>
+        `;
+        if (order.boleto) {
+          boletoSelect.value = order.boleto;
+        }
+        boletoSelect.addEventListener('change', () => {
+          markUserEdit();
+          persistNfFields(order, card);
+        });
+        boletoSelect.addEventListener('focus', markUserEdit);
+        boletoGroup.appendChild(boletoLabel);
+        boletoGroup.appendChild(boletoSelect);
+
         wrapper.appendChild(nfGroup);
         wrapper.appendChild(nfFreteGroup);
+        wrapper.appendChild(boletoGroup);
 
         nfCheckbox.addEventListener('change', () => {
+          markUserEdit();
           if (nfCheckbox.checked) {
             nfInputs.innerHTML = '';
             nfInputs.appendChild(buildNfInputRow('não veio', order, card));
@@ -725,6 +783,7 @@
         });
 
         nfFreteCheckbox.addEventListener('change', () => {
+          markUserEdit();
           if (nfFreteCheckbox.checked) {
             nfFreteInput.value = 'não veio';
             nfFreteInput.disabled = true;
@@ -752,6 +811,11 @@
           input.value = value;
         }
         input.addEventListener('blur', () => persistNfFields(order, card));
+        input.addEventListener('input', () => {
+          markUserEdit();
+          persistNfFieldsDebounced(order, card);
+        });
+        input.addEventListener('focus', markUserEdit);
         row.appendChild(input);
         return row;
       }
@@ -775,15 +839,38 @@
         const nfValue = nfValues.join(', ');
         const nfFreteInput = card.querySelector('.nf-frete-input');
         const nfFreteValue = nfFreteInput ? nfFreteInput.value.trim() : '';
+        const boletoSelect = card.querySelector('select');
+        const boletoValue = boletoSelect ? boletoSelect.value : '';
 
         google.script.run
           .withSuccessHandler(() => {
             order.nf = nfValue;
             order.nfFrete = nfFreteValue;
+            order.boleto = boletoValue;
           })
           .withFailureHandler(showError)
-          .updateOrderHeaderFields(order.oc, nfValue, nfFreteValue);
+          .updateOrderHeaderFields(order.oc, nfValue, nfFreteValue, boletoValue);
       }
+
+      function persistOrderComment(order, commentValue) {
+        google.script.run
+          .withSuccessHandler(() => {
+            order.comment = commentValue;
+          })
+          .withFailureHandler(showError)
+          .updateOrderComment(order.oc, commentValue);
+      }
+
+      const persistNfFieldsDebounced = (() => {
+        const timers = new Map();
+        return (order, card) => {
+          const key = order.oc || '';
+          if (timers.has(key)) {
+            clearTimeout(timers.get(key));
+          }
+          timers.set(key, setTimeout(() => persistNfFields(order, card), 500));
+        };
+      })();
 
       function buildItemsTable(order, card) {
         const table = document.createElement('table');
@@ -832,9 +919,17 @@
           validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
           labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
 
-          qtyInput.addEventListener('input', () => updateOrderButtonStateForCard(card));
-          validityInput.addEventListener('input', () => updateOrderButtonStateForCard(card));
-          labelInput.addEventListener('input', () => updateOrderButtonStateForCard(card));
+          const handleItemInput = () => {
+            markUserEdit();
+            saveItemDebounced(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex);
+            updateOrderButtonStateForCard(card);
+          };
+          qtyInput.addEventListener('input', handleItemInput);
+          validityInput.addEventListener('input', handleItemInput);
+          labelInput.addEventListener('input', handleItemInput);
+          qtyInput.addEventListener('focus', markUserEdit);
+          validityInput.addEventListener('focus', markUserEdit);
+          labelInput.addEventListener('focus', markUserEdit);
 
           row.appendChild(wrapCell(qtyInput));
           row.appendChild(wrapCell(validityInput));
@@ -872,6 +967,19 @@
           .withFailureHandler(showError)
           .updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue, rowIndex);
       }
+
+      const saveItemDebounced = (() => {
+        const timers = new Map();
+        return (oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) => {
+          const key = `${oc}-${lineNo}`;
+          if (timers.has(key)) {
+            clearTimeout(timers.get(key));
+          }
+          timers.set(key, setTimeout(() => {
+            saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex);
+          }, 500));
+        };
+      })();
 
       function updateOrderButtonState(oc) {
         const card = document.querySelector(`.card[data-oc="${cssEscape(oc)}"]`);
@@ -922,34 +1030,21 @@
           message.textContent = 'Informe largura e altura válidas para as etiquetas.';
           return;
         }
-        const printWindow = window.open('about:blank', '_blank');
-        if (printWindow) {
-          printWindow.document.write('<p>Gerando PDF...</p>');
-        }
         button.disabled = true;
         button.textContent = 'Processando...';
 
         google.script.run
           .withSuccessHandler((response) => {
             button.dataset.locked = 'true';
-            removeOrderFromCache(order.oc);
-            removeOrderCard(order.oc);
-            const fileId = response && response.pdfFileId ? response.pdfFileId : '';
-            const printUrl = buildPrintUrl(fileId);
-            if (printWindow && printUrl) {
-              printWindow.location.href = printUrl;
-            } else if (response && response.pdfUrl) {
-              window.open(response.pdfUrl, '_blank', 'noopener');
-            }
-            openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
+            refreshOrders(true);
+            setTimeout(() => {
+              openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '');
+            }, 0);
           })
           .withFailureHandler((error) => {
             button.disabled = false;
             button.textContent = 'Recebido';
             message.textContent = error.message || 'Falha ao marcar como recebido.';
-            if (printWindow) {
-              printWindow.close();
-            }
           })
           .receiveOrder(order.oc, labelWidth, labelHeight);
       }
@@ -1045,7 +1140,11 @@
       }
 
       function openLabelsModal(url) {
-        pdfLink.href = url || '#';
+        const normalizedUrl = url || '';
+        pdfLink.href = normalizedUrl || '#';
+        if (pdfMessage) {
+          pdfMessage.textContent = normalizedUrl ? '' : 'PDF não retornou URL.';
+        }
         labelsModal.style.display = 'flex';
       }
 
@@ -1153,6 +1252,7 @@
           groupOcs: safeText(order && order.groupOcs),
           groupSentAts: safeText(order && order.groupSentAts),
           comment: safeText(order && order.comment),
+          boleto: safeText(order && order.boleto),
           buyerDetails: asArray(order && order.buyerDetails),
           supplierDetails: asArray(order && order.supplierDetails),
           items: Array.isArray(order && order.items) ? order.items : [],

@@ -21,6 +21,7 @@ const ORDER_COLUMN_LETTERS = {
   groupSentAts: 'N',
   comment: 'P',
   receivedAt: 'O',
+  boleto: 'R',
 };
 
 const ITEM_COLUMN_LETTERS = {
@@ -35,6 +36,7 @@ const ITEM_COLUMN_LETTERS = {
   qtyReceived: 'I',
   validity: 'K',
   labels: 'N',
+  obsItem: 'P',
   buyerSelected: 'B',
   supplierSelected: 'C',
   receivedAt: 'D',
@@ -67,6 +69,7 @@ const ORDER_HEADERS = [
   'groupSentAts',
   'comment',
   'receivedAt',
+  'boleto',
 ];
 
 const ITEM_HEADERS = [
@@ -81,6 +84,7 @@ const ITEM_HEADERS = [
   'qtyReceived',
   'validity',
   'labels',
+  'obsItem',
   'buyerSelected',
   'supplierSelected',
   'receivedAt',
@@ -229,7 +233,7 @@ function updateItemFields(oc, lineNo, qtyReceived, validity, labels, rowIndex) {
   return { ok: true };
 }
 
-function updateOrderHeaderFields(oc, nfValue, nfFreteValue) {
+function updateOrderHeaderFields(oc, nfValue, nfFreteValue, boletoValue) {
   if (!oc) {
     throw new Error('OC inválida.');
   }
@@ -244,8 +248,12 @@ function updateOrderHeaderFields(oc, nfValue, nfFreteValue) {
   const indexMap = getOrderIndexMap_(ordersRange);
   const sheet = ordersRange.getSheet();
   const startCol = ordersRange.getColumn();
+  // Atualiza NF/NF frete e boleto quando informado.
   sheet.getRange(row, startCol + indexMap.nf, 1, 1).setValue(nfValue || '');
   sheet.getRange(row, startCol + indexMap.nfFrete, 1, 1).setValue(nfFreteValue || '');
+  if (boletoValue !== undefined) {
+    sheet.getRange(row, startCol + indexMap.boleto, 1, 1).setValue(boletoValue || '');
+  }
 
   return { ok: true };
 }
@@ -268,6 +276,11 @@ function updateOrderCommentField(oc, commentValue) {
   sheet.getRange(row, startCol + indexMap.comment, 1, 1).setValue(String(commentValue || ''));
 
   return { ok: true };
+}
+
+function updateOrderComment(oc, commentText) {
+  // Wrapper para manter compatibilidade de endpoint.
+  return updateOrderCommentField(oc, commentText);
 }
 
 function receiveOrder(oc, labelWidthCm, labelHeightCm) {
@@ -324,19 +337,10 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     const ordersSheet = ordersRange.getSheet();
     const ordersStartCol = ordersRange.getColumn();
     const orderIndexMap = getOrderIndexMap_(ordersRange);
-    const groupOcs = parseGroupOcs_(order.groupOcs);
-    if (groupOcs.length) {
-      groupOcs.forEach((groupOc) => {
-        const groupRow = findOrderRowByOcInRange_(ordersRange, groupOc);
-        if (groupRow) {
-          ordersSheet.getRange(groupRow, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
-          ordersSheet.getRange(groupRow, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
-        }
-      });
-    } else {
-      ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
-      ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
-    }
+    // Marca como recebido apenas a OC atual (não altera outros pedidos).
+    ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
+    ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
+    ordersSheet.getRange(orderRow, 3).setValue(receivedAt); // Coluna C absoluta.
 
     return { ok: true, oc, pdfUrl: pdfResult.pdfUrl, pdfFileId: pdfResult.pdfFileId };
   } finally {
@@ -371,8 +375,10 @@ function markReceived(oc) {
   const ordersSheet = ordersRange.getSheet();
   const ordersStartCol = ordersRange.getColumn();
   const orderIndexMap = getOrderIndexMap_(ordersRange);
+  const receivedAt = new Date();
   ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
-  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.receivedAt).setValue(new Date());
+  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
+  ordersSheet.getRange(row, 3).setValue(receivedAt); // Coluna C absoluta.
 
   return { ok: true };
 }
@@ -550,6 +556,9 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
       if (!entry) {
         return '<div class="label label-empty"></div>';
       }
+      const obsLine = entry.obs
+        ? `<div class="label-line"><strong>Obs:</strong> ${escapeHtml_(entry.obs)}</div>`
+        : '';
       return `
         <div class="label">
           <div class="label-line"><strong>OC:</strong> ${escapeHtml_(entry.oc)}</div>
@@ -557,6 +566,7 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
           <div class="label-line"><strong>Item:</strong> ${escapeHtml_(entry.item)}</div>
           <div class="label-line"><strong>Código:</strong> ${escapeHtml_(entry.code)}</div>
           <div class="label-line"><strong>Validade:</strong> ${escapeHtml_(entry.validity)}</div>
+          ${obsLine}
         </div>
       `;
     });
@@ -721,6 +731,8 @@ function buildLabelsQueue_(order, items) {
         item: item.item || '',
         code: item.code || '',
         validity: item.validity || '',
+        // Observação do item (coluna P do REC_POR_ITEM).
+        obs: item.obsItem || '',
       });
     }
   });
@@ -762,6 +774,7 @@ function buildOrderRow_(payload, normalized) {
     valueTotal: totals.valueTotal || 0,
     nf: '',
     nfFrete: '',
+    boleto: '',
     buyerDetailsJson: JSON.stringify(normalized.buyerDetails || []),
     supplierDetailsJson: JSON.stringify(normalized.supplierDetails || []),
     groupOcs: '',
@@ -784,6 +797,7 @@ function buildItemRows_(oc, items, buyerSelected, supplierSelected) {
     qtyReceived: '',
     validity: '',
     labels: '',
+    obsItem: '',
     buyerSelected: buyerSelected || '',
     supplierSelected: supplierSelected || '',
     receivedAt: '',
@@ -832,6 +846,7 @@ function readOrdersFromRange_(range) {
       valueTotal: row[indexMap.valueTotal],
       nf: row[indexMap.nf],
       nfFrete: row[indexMap.nfFrete],
+      boleto: row[indexMap.boleto] || '',
       buyerDetails: parseJsonSafe_(row[indexMap.buyerDetailsJson]),
       supplierDetails: parseJsonSafe_(row[indexMap.supplierDetailsJson]),
       groupOcs: row[indexMap.groupOcs] || '',
@@ -872,6 +887,7 @@ function readItemsByOcFromRange_(range) {
       qtyReceived: row[indexMap.qtyReceived],
       validity: formatDateOnly_(row[indexMap.validity]),
       labels: row[indexMap.labels],
+      obsItem: row[indexMap.obsItem] || '',
       buyerSelected,
       supplierSelected,
       receivedAt: row[indexMap.receivedAt],
@@ -958,6 +974,7 @@ function mapOrderRowToRange_(row, totalCols, indexMap) {
   output[indexMap.valueTotal] = row.valueTotal;
   output[indexMap.nf] = row.nf;
   output[indexMap.nfFrete] = row.nfFrete;
+  output[indexMap.boleto] = row.boleto || '';
   output[indexMap.buyerDetailsJson] = row.buyerDetailsJson;
   output[indexMap.supplierDetailsJson] = row.supplierDetailsJson;
   output[indexMap.groupOcs] = row.groupOcs;
@@ -995,6 +1012,7 @@ function mapItemRowToRange_(row, totalCols, indexMap) {
   output[indexMap.qtyReceived] = row.qtyReceived;
   output[indexMap.validity] = row.validity;
   output[indexMap.labels] = row.labels;
+  output[indexMap.obsItem] = row.obsItem || '';
   output[indexMap.buyerSelected] = row.buyerSelected;
   output[indexMap.supplierSelected] = row.supplierSelected;
   output[indexMap.receivedAt] = row.receivedAt;
