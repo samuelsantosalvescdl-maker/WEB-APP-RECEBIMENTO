@@ -664,30 +664,88 @@
             draftState.delete(key);
           }
         });
-
-        ordersContainer.appendChild(frag);
-        updateGroupButtonState();
-        console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
       }
 
-      function markUserEdit() {
-        lastUserEditAt = Date.now();
+      function startPendingSave(key) {
+        if (!pendingSaveKeys.has(key)) {
+          pendingSaveKeys.add(key);
+          pendingSaves += 1;
+        }
       }
 
-      function setDraftValue(key, value) {
-        draftState.set(key, value);
+      function finishPendingSave(key) {
+        if (pendingSaveKeys.has(key)) {
+          pendingSaveKeys.delete(key);
+          pendingSaves = Math.max(0, pendingSaves - 1);
+        }
       }
 
-      function getDraftValue(key, fallback) {
-        return draftState.has(key) ? draftState.get(key) : fallback;
-      }
-
-      function clearDraftByPrefix(prefix) {
-        Array.from(draftState.keys()).forEach((key) => {
-          if (key.startsWith(prefix)) {
-            draftState.delete(key);
+      function debounce(fn, delayMs) {
+        let timer = null;
+        return (...args) => {
+          if (timer) {
+            clearTimeout(timer);
           }
-        });
+          timer = setTimeout(() => fn(...args), delayMs);
+        };
+      }
+
+      function getDraftRowsForOc(oc) {
+        if (!draftRowsByOc.has(oc)) {
+          draftRowsByOc.set(oc, []);
+        }
+        return draftRowsByOc.get(oc);
+      }
+
+      function createDraftRowState(oc) {
+        const draft = {
+          draftId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          token: '',
+          label: '',
+          code: '',
+          unit: '',
+          name: '',
+          inputValue: '',
+          createdAt: Date.now(),
+        };
+        getDraftRowsForOc(oc).push(draft);
+        return draft;
+      }
+
+      function updateDraftRowState(oc, draftId, updates) {
+        const drafts = getDraftRowsForOc(oc);
+        const idx = drafts.findIndex((entry) => entry.draftId === draftId);
+        if (idx === -1) {
+          return null;
+        }
+        drafts[idx] = Object.assign({}, drafts[idx], updates);
+        return drafts[idx];
+      }
+
+      function removeDraftRowState(oc, draftId) {
+        const drafts = getDraftRowsForOc(oc);
+        const next = drafts.filter((entry) => entry.draftId !== draftId);
+        draftRowsByOc.set(oc, next);
+      }
+
+      function patchOrderCache_(oc, patch) {
+        const target = ordersCache.find((order) => String(order.oc) === String(oc));
+        if (!target) {
+          return;
+        }
+        Object.assign(target, patch);
+      }
+
+      function patchItemCache_(oc, lineNo, patch) {
+        const target = ordersCache.find((order) => String(order.oc) === String(oc));
+        if (!target || !Array.isArray(target.items)) {
+          return;
+        }
+        const itemTarget = target.items.find((item) => Number(item.lineNo) === Number(lineNo));
+        if (!itemTarget) {
+          return;
+        }
+        Object.assign(itemTarget, patch);
       }
 
       function startPendingSave(key) {
@@ -888,6 +946,7 @@
         const boletoLabel = document.createElement('label');
         boletoLabel.textContent = 'Boleto';
         const boletoSelect = document.createElement('select');
+        boletoSelect.classList.add('js-boleto-select');
         boletoSelect.innerHTML = `
           <option value="">Selecione...</option>
           <option value="VEIO">VEIO</option>
@@ -997,14 +1056,12 @@
         const nfValue = nfValues.join(', ');
         const nfFreteInput = card.querySelector('.nf-frete-input');
         const nfFreteValue = nfFreteInput ? nfFreteInput.value.trim() : '';
-        const boletoSelect = card.querySelector('select');
+        const boletoSelect = card.querySelector('.js-boleto-select');
         const boletoValue = boletoSelect ? boletoSelect.value : '';
 
         google.script.run
           .withSuccessHandler(() => {
-            order.nf = nfValue;
-            order.nfFrete = nfFreteValue;
-            order.boleto = boletoValue;
+            patchOrderCache_(order.oc, { nf: nfValue, nfFrete: nfFreteValue, boleto: boletoValue });
             clearDraftByPrefix(`nf:${order.oc}:`);
             draftState.delete(`nfFrete:${order.oc}`);
             draftState.delete(`boleto:${order.oc}`);
@@ -1020,7 +1077,7 @@
       function persistOrderComment(order, commentValue, draftKey) {
         google.script.run
           .withSuccessHandler(() => {
-            order.comment = commentValue;
+            patchOrderCache_(order.oc, { comment: commentValue });
             if (draftKey) {
               draftState.delete(draftKey);
               finishPendingSave(draftKey);
@@ -1340,10 +1397,42 @@
         return td;
       }
 
+      function labelsInputIsInvalid_(rawValue, parsedValue) {
+        if (rawValue === '') {
+          return false;
+        }
+        if (Number.isNaN(parsedValue)) {
+          return true;
+        }
+        return !Number.isInteger(parsedValue);
+      }
+
       function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey) {
         const qtyValue = qtyInput.value === '' ? '' : parseNumber(qtyInput.value);
         const validityValue = validityInput.value;
         const labelsValue = labelInput.value === '' ? '' : parseNumber(labelInput.value);
+
+        if (qtyInput.value !== '' && Number.isNaN(qtyValue)) {
+          if (saveKey) {
+            finishPendingSave(saveKey);
+          }
+          showError({ message: 'Quantidade recebida inválida.' });
+          return;
+        }
+        if (labelsInputIsInvalid_(labelInput.value, labelsValue)) {
+          if (saveKey) {
+            finishPendingSave(saveKey);
+          }
+          showError({ message: 'Etiquetas inválidas.' });
+          return;
+        }
+        if (validityValue && !isValidDate(validityValue)) {
+          if (saveKey) {
+            finishPendingSave(saveKey);
+          }
+          showError({ message: 'Validade inválida.' });
+          return;
+        }
 
         google.script.run
           .withSuccessHandler(() => {
@@ -1351,6 +1440,11 @@
             if (saveKey) {
               finishPendingSave(saveKey);
             }
+            patchItemCache_(oc, lineNo, {
+              qtyReceived: qtyValue,
+              validity: validityValue,
+              labels: labelsValue,
+            });
           })
           .withFailureHandler((error) => {
             if (saveKey) {
