@@ -320,8 +320,10 @@
 
       function init() {
         loadFilterOptions();
-        loadManualProductOptions();
-        refreshOrders();
+        loadManualProductOptions(() => {
+          refreshOrders();
+          setInterval(refreshOrders, 15000);
+        });
 
         buyerFilter.addEventListener('change', renderFilteredOrders);
         supplierFilter.addEventListener('change', renderFilteredOrders);
@@ -347,7 +349,6 @@
           });
         }
 
-        setInterval(refreshOrders, 15000);
       }
 
       function loadFilterOptions() {
@@ -362,7 +363,7 @@
           .getSupplierOptions();
       }
 
-      function loadManualProductOptions() {
+      function loadManualProductOptions(onComplete) {
         google.script.run
           .withSuccessHandler((options) => {
             manualProductOptions = options || [];
@@ -372,6 +373,9 @@
                 manualProductMap.set(option.token, option);
               }
             });
+            if (onComplete) {
+              onComplete();
+            }
           })
           .withFailureHandler(showError)
           .getManualProductOptions();
@@ -1001,6 +1005,9 @@
           const qtyInput = buildInput('number', getDraftValue(qtyKey, item.qtyReceived), 'Quantidade recebida');
           const validityInput = buildInput('text', getDraftValue(validityKey, normalizeDateInput(item.validity)), 'Validade dd/MM/yyyy');
           const labelInput = buildInput('number', getDraftValue(labelsKey, item.labels), 'Etiquetas');
+          qtyInput.classList.add('js-qty-received');
+          validityInput.classList.add('js-validity');
+          labelInput.classList.add('js-labels');
 
           const saveKey = `item:${order.oc}:${item.lineNo}`;
           qtyInput.addEventListener('blur', () => {
@@ -1038,61 +1045,127 @@
           body.appendChild(row);
         });
 
-        const addRow = document.createElement('tr');
-        const codeCell = document.createElement('td');
-        const itemCell = document.createElement('td');
-        const unitCell = document.createElement('td');
-        const qtyCell = document.createElement('td');
-        const unitPriceCell = document.createElement('td');
-        const totalCell = document.createElement('td');
-        const qtyReceivedCell = document.createElement('td');
-        const validityCell = document.createElement('td');
-        const labelsCell = document.createElement('td');
-        const addSelect = document.createElement('select');
-        addSelect.innerHTML = '<option value="">Adicionar item...</option>';
-        manualProductOptions.forEach((option) => {
-          const opt = document.createElement('option');
-          opt.value = option.token;
-          opt.textContent = option.label;
-          addSelect.appendChild(opt);
+        const controlRow = document.createElement('tr');
+        const controlCell = document.createElement('td');
+        controlCell.colSpan = 9;
+        const controlButton = document.createElement('button');
+        controlButton.type = 'button';
+        controlButton.className = 'btn btn-secondary';
+        controlButton.textContent = '+ Adicionar item';
+        controlCell.appendChild(controlButton);
+        controlRow.appendChild(controlCell);
+
+        const createDraftRow = () => {
+          const draftRow = document.createElement('tr');
+          draftRow.className = 'draft-row';
+          const codeCell = document.createElement('td');
+          const itemCell = document.createElement('td');
+          const unitCell = document.createElement('td');
+          const qtyCell = document.createElement('td');
+          const unitPriceCell = document.createElement('td');
+          const totalCell = document.createElement('td');
+          const qtyReceivedCell = document.createElement('td');
+          const validityCell = document.createElement('td');
+          const labelsCell = document.createElement('td');
+
+          const inputWrap = document.createElement('div');
+          inputWrap.style.position = 'relative';
+          const comboInput = document.createElement('input');
+          comboInput.type = 'text';
+          comboInput.placeholder = 'Buscar item...';
+          const optionsList = document.createElement('div');
+          optionsList.style.border = '1px solid #ccc';
+          optionsList.style.background = '#fff';
+          optionsList.style.maxHeight = '140px';
+          optionsList.style.overflowY = 'auto';
+          optionsList.style.marginTop = '4px';
+          optionsList.style.display = 'none';
+
+          const renderOptions = (query) => {
+            const normalizedQuery = normalizeText(query);
+            optionsList.innerHTML = '';
+            const matches = manualProductOptions.filter((option) => {
+              const label = normalizeText(option.label || '');
+              const name = normalizeText(option.name || '');
+              return !normalizedQuery || label.includes(normalizedQuery) || name.includes(normalizedQuery);
+            }).slice(0, 20);
+            matches.forEach((option) => {
+              const optionEl = document.createElement('div');
+              optionEl.textContent = option.label;
+              optionEl.style.padding = '4px 6px';
+              optionEl.style.cursor = 'pointer';
+              optionEl.addEventListener('click', () => selectOption(option));
+              optionsList.appendChild(optionEl);
+            });
+            optionsList.style.display = matches.length ? 'block' : 'none';
+          };
+
+          const selectOption = (option) => {
+            if (!option) {
+              return;
+            }
+            comboInput.value = option.label;
+            codeCell.textContent = option.code || '';
+            unitCell.textContent = option.unit || '';
+            markUserEdit();
+            google.script.run
+              .withSuccessHandler(() => {
+                draftRow.remove();
+                refreshOrders();
+              })
+              .withFailureHandler(showError)
+              .addManualItemToOc(order.oc, option.code, option.name, option.unit);
+          };
+
+          comboInput.addEventListener('input', () => {
+            markUserEdit();
+            renderOptions(comboInput.value);
+          });
+          comboInput.addEventListener('focus', () => {
+            markUserEdit();
+            renderOptions(comboInput.value);
+          });
+          comboInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              const firstOption = manualProductOptions.find((option) => {
+                const label = normalizeText(option.label || '');
+                return label === normalizeText(comboInput.value);
+              });
+              if (firstOption) {
+                selectOption(firstOption);
+              }
+            }
+          });
+
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'btn btn-secondary';
+          removeButton.textContent = 'x';
+          removeButton.addEventListener('click', () => draftRow.remove());
+
+          inputWrap.appendChild(comboInput);
+          inputWrap.appendChild(optionsList);
+          itemCell.appendChild(inputWrap);
+          labelsCell.appendChild(removeButton);
+
+          draftRow.appendChild(codeCell);
+          draftRow.appendChild(itemCell);
+          draftRow.appendChild(unitCell);
+          draftRow.appendChild(qtyCell);
+          draftRow.appendChild(unitPriceCell);
+          draftRow.appendChild(totalCell);
+          draftRow.appendChild(qtyReceivedCell);
+          draftRow.appendChild(validityCell);
+          draftRow.appendChild(labelsCell);
+          body.insertBefore(draftRow, controlRow);
+        };
+
+        controlButton.addEventListener('click', () => {
+          createDraftRow();
         });
-        addSelect.addEventListener('change', () => {
-          const selected = manualProductMap.get(addSelect.value);
-          codeCell.textContent = selected ? selected.code || '' : '';
-          unitCell.textContent = selected ? selected.unit || '' : '';
-        });
-        const addButton = document.createElement('button');
-        addButton.type = 'button';
-        addButton.className = 'btn btn-secondary';
-        addButton.textContent = 'Adicionar linha';
-        addButton.addEventListener('click', () => {
-          const selected = manualProductMap.get(addSelect.value);
-          if (!selected) {
-            return;
-          }
-          markUserEdit();
-          google.script.run
-            .withSuccessHandler(() => {
-              addSelect.value = '';
-              codeCell.textContent = '';
-              unitCell.textContent = '';
-              refreshOrders(true);
-            })
-            .withFailureHandler(showError)
-            .addManualItemToOc(order.oc, selected.code, selected.name, selected.unit);
-        });
-        itemCell.appendChild(addSelect);
-        labelsCell.appendChild(addButton);
-        addRow.appendChild(codeCell);
-        addRow.appendChild(itemCell);
-        addRow.appendChild(unitCell);
-        addRow.appendChild(qtyCell);
-        addRow.appendChild(unitPriceCell);
-        addRow.appendChild(totalCell);
-        addRow.appendChild(qtyReceivedCell);
-        addRow.appendChild(validityCell);
-        addRow.appendChild(labelsCell);
-        body.appendChild(addRow);
+
+        body.appendChild(controlRow);
 
         table.appendChild(body);
         return table;
@@ -1164,13 +1237,15 @@
         const inputs = card.querySelectorAll('tbody tr');
         let complete = true;
         inputs.forEach((row) => {
-          const fields = row.querySelectorAll('input');
-          if (!fields.length) {
+          const qtyInput = row.querySelector('.js-qty-received');
+          const validityInput = row.querySelector('.js-validity');
+          const labelsInput = row.querySelector('.js-labels');
+          if (!qtyInput || !validityInput || !labelsInput) {
             return;
           }
-          const qty = fields[0] ? fields[0].value : '';
-          const validity = fields[1] ? fields[1].value : '';
-          const labels = fields[2] ? fields[2].value : '';
+          const qty = qtyInput.value;
+          const validity = validityInput.value;
+          const labels = labelsInput.value;
           if (!isPositiveNumber(qty) || !isValidDate(validity) || !isPositiveInteger(labels)) {
             complete = false;
           }
