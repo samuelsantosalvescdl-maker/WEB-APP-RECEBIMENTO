@@ -784,6 +784,39 @@ function sendToWebAppC_(order, items, pdfResult) {
   if (!parsed) {
     throw new Error(buildWebAppCError_(status, null, text));
   }
+  const info = {
+    scriptId: parsed.scriptId || '',
+    expectedKeyLast3: parsed.expectedKeyLast3 || '',
+  };
+  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
+  return info;
+}
+
+function buildWebAppCError_(status, message, bodyText) {
+  const snippet = String(bodyText || '').slice(0, 200);
+  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
+  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
+}
+
+function readManualProductRange_(spreadsheet, rangeName, labelPrefix) {
+  const range = getNamedRange_(spreadsheet, rangeName);
+  const values = range.getValues();
+  const startRow = range.getRow();
+  return values.map((row, index) => {
+    const code = row[0];
+    const name = row[1];
+    const unit = row[2];
+    if (!name) {
+      return null;
+    }
+    return {
+      token: `${labelPrefix}||${startRow + index}`,
+      label: `${labelPrefix} - ${name}`,
+      code,
+      name,
+      unit,
+    };
+  }).filter((entry) => entry);
 }
 
 function testWebAppCConnection_() {

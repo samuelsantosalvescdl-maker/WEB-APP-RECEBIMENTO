@@ -664,6 +664,54 @@
             draftState.delete(key);
           }
         });
+
+        ordersContainer.appendChild(frag);
+        updateGroupButtonState();
+        console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
+      }
+
+      function markUserEdit() {
+        lastUserEditAt = Date.now();
+      }
+
+      function setDraftValue(key, value) {
+        draftState.set(key, value);
+      }
+
+      function getDraftValue(key, fallback) {
+        return draftState.has(key) ? draftState.get(key) : fallback;
+      }
+
+      function clearDraftByPrefix(prefix) {
+        Array.from(draftState.keys()).forEach((key) => {
+          if (key.startsWith(prefix)) {
+            draftState.delete(key);
+          }
+        });
+      }
+
+      function startPendingSave(key) {
+        if (!pendingSaveKeys.has(key)) {
+          pendingSaveKeys.add(key);
+          pendingSaves += 1;
+        }
+      }
+
+      function finishPendingSave(key) {
+        if (pendingSaveKeys.has(key)) {
+          pendingSaveKeys.delete(key);
+          pendingSaves = Math.max(0, pendingSaves - 1);
+        }
+      }
+
+      function debounce(fn, delayMs) {
+        let timer = null;
+        return (...args) => {
+          if (timer) {
+            clearTimeout(timer);
+          }
+          timer = setTimeout(() => fn(...args), delayMs);
+        };
       }
 
       function startPendingSave(key) {
