@@ -201,6 +201,49 @@ function getOrdersWithItems() {
   });
 }
 
+function getPendingOrdersWithItems(buyerFilterValue, supplierFilterValue) {
+  const spreadsheet = getSpreadsheet_();
+  const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+  const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
+
+  const orders = readOrdersFromRange_(ordersRange);
+  const itemsByOc = readItemsByOcFromRange_(itemsRange);
+  const buyerFilter = normalizeText_(buyerFilterValue);
+  const supplierFilter = normalizeText_(supplierFilterValue);
+
+  const enriched = orders
+    .filter((order) => normalizeText_(order.status).startsWith('PENDENTE'))
+    .map((order) => {
+      const ocKey = String(order.oc || '').trim();
+      const items = itemsByOc[ocKey] || [];
+      const inferred = inferBuyerSupplier_(order, items);
+      return Object.assign({}, order, {
+        oc: ocKey,
+        buyerSelected: inferred.buyerSelected,
+        supplierSelected: inferred.supplierSelected,
+        items,
+      });
+    })
+    .filter((order) => {
+      if (!buyerFilter && !supplierFilter) {
+        return true;
+      }
+      const buyerOk = buyerFilter
+        ? matchesAnyFieldBackend_(buyerFilter, order.buyerSelected, order.buyerDetails)
+        : true;
+      const supplierOk = supplierFilter
+        ? matchesAnyFieldBackend_(supplierFilter, order.supplierSelected, order.supplierDetails)
+        : true;
+      return buyerOk && supplierOk;
+    });
+
+  return enriched.sort((a, b) => {
+    const dateA = a.sentAt ? new Date(a.sentAt).getTime() : 0;
+    const dateB = b.sentAt ? new Date(b.sentAt).getTime() : 0;
+    return dateB - dateA;
+  });
+}
+
 function getBuyerOptions() {
   const spreadsheet = getSpreadsheet_();
   return getNamedRangeOptions_(spreadsheet, 'EMP_COMP');
@@ -209,6 +252,68 @@ function getBuyerOptions() {
 function getSupplierOptions() {
   const spreadsheet = getSpreadsheet_();
   return getNamedRangeOptions_(spreadsheet, 'EMP_FORN');
+}
+
+function getManualProductOptions() {
+  const spreadsheet = getSpreadsheet_();
+  const sources = [
+    { name: 'INS', label: 'INS' },
+    { name: 'ITENS_VEND', label: 'ITENS_VEND' },
+    { name: 'USO_CONS_LIMP', label: 'USO_CONS_LIMP' },
+  ];
+  return sources.flatMap((source) => readManualProductRange_(spreadsheet, source.name, source.label));
+}
+
+function addManualItemToOc(oc, code, name, unit) {
+  if (!oc) {
+    throw new Error('OC inválida.');
+  }
+  const spreadsheet = getSpreadsheet_();
+  const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
+  const values = itemsRange.getValues();
+  const indexMap = getItemIndexMap_(itemsRange);
+
+  let maxLineNo = 0;
+  values.forEach((row) => {
+    if (String(row[indexMap.oc]) !== String(oc)) {
+      return;
+    }
+    const lineNo = Number(row[indexMap.lineNo]);
+    if (lineNo > maxLineNo) {
+      maxLineNo = lineNo;
+    }
+  });
+
+  const insertIndex = findNextEmptyIndex_(values, indexMap.oc);
+  if (insertIndex === -1) {
+    throw new Error('Sem espaço disponível no intervalo REC_POR_ITEM para inserir itens.');
+  }
+
+  const lineNo = maxLineNo + 1;
+  const rowIndex = itemsRange.getRow() + insertIndex;
+  const newRow = mapItemRowToRange_({
+    oc,
+    lineNo,
+    code: code || '',
+    item: name || '',
+    unit: unit || '',
+    qty: '',
+    unitPrice: '',
+    total: '',
+    qtyReceived: '',
+    validity: '',
+    labels: '',
+    obsItem: '',
+    buyerSelected: '',
+    supplierSelected: '',
+    receivedAt: '',
+  }, values[0].length, indexMap);
+
+  const sheet = itemsRange.getSheet();
+  const startCol = itemsRange.getColumn();
+  sheet.getRange(rowIndex, startCol, 1, newRow.length).setValues([newRow]);
+
+  return { ok: true, lineNo, rowIndex };
 }
 
 function updateItemFields(oc, lineNo, qtyReceived, validity, labels, rowIndex) {
@@ -557,7 +662,7 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
         return '<div class="label label-empty"></div>';
       }
       const obsLine = entry.obs
-        ? `<div class="label-line"><strong>Obs:</strong> ${escapeHtml_(entry.obs)}</div>`
+        ? `<div class="label-line"><strong>End:</strong> ${escapeHtml_(entry.obs)}</div>`
         : '';
       return `
         <div class="label">
@@ -681,6 +786,21 @@ function sendToWebAppC_(order, items, pdfResult) {
   if (!parsed) {
     throw new Error(buildWebAppCError_(status, null, text));
   }
+  if (!parsed || parsed.ok !== true) {
+    throw new Error(buildWebAppCError_(status, parsed && parsed.error, text));
+  }
+  const info = {
+    scriptId: parsed.scriptId || '',
+    expectedKeyLast3: parsed.expectedKeyLast3 || '',
+  };
+  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
+  return info;
+}
+
+function buildWebAppCError_(status, message, bodyText) {
+  const snippet = String(bodyText || '').slice(0, 200);
+  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
+  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
 }
 
 function testWebAppCConnection_() {
@@ -714,6 +834,27 @@ function buildWebAppCError_(status, message, bodyText) {
   const snippet = String(bodyText || '').slice(0, 200);
   const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
   return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
+}
+
+function readManualProductRange_(spreadsheet, rangeName, labelPrefix) {
+  const range = getNamedRange_(spreadsheet, rangeName);
+  const values = range.getValues();
+  const startRow = range.getRow();
+  return values.map((row, index) => {
+    const code = row[0];
+    const name = row[1];
+    const unit = row[2];
+    if (!name) {
+      return null;
+    }
+    return {
+      token: `${labelPrefix}||${startRow + index}`,
+      label: `${labelPrefix} - ${name}`,
+      code,
+      name,
+      unit,
+    };
+  }).filter((entry) => entry);
 }
 
 function formatDateTime_(value) {
@@ -1055,6 +1196,25 @@ function normalizeText_(value) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ');
+}
+
+function matchesAnyFieldBackend_(filterValue, primaryValue, detailsList) {
+  const normalizedFilter = normalizeText_(filterValue);
+  const normalizedPrimary = normalizeText_(primaryValue);
+  if (normalizedPrimary && (normalizedPrimary === normalizedFilter
+    || normalizedPrimary.includes(normalizedFilter)
+    || normalizedFilter.includes(normalizedPrimary))) {
+    return true;
+  }
+  if (!detailsList || !detailsList.length) {
+    return false;
+  }
+  return detailsList.some((entry) => {
+    const normalizedEntry = normalizeText_(entry);
+    return normalizedEntry === normalizedFilter
+      || normalizedEntry.includes(normalizedFilter)
+      || normalizedFilter.includes(normalizedEntry);
+  });
 }
 
 function inferBuyerSupplier_(order, items) {

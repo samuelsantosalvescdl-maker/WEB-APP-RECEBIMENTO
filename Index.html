@@ -311,10 +311,16 @@
       const debugSupplier = document.getElementById('debugSupplier');
       let ordersCache = [];
       const selectedGroupOcs = new Set();
+      const draftState = new Map();
       let lastUserEditAt = 0;
+      let pendingSaves = 0;
+      const pendingSaveKeys = new Set();
+      let manualProductOptions = [];
+      const manualProductMap = new Map();
 
       function init() {
         loadFilterOptions();
+        loadManualProductOptions();
         refreshOrders();
 
         buyerFilter.addEventListener('change', renderFilteredOrders);
@@ -356,6 +362,21 @@
           .getSupplierOptions();
       }
 
+      function loadManualProductOptions() {
+        google.script.run
+          .withSuccessHandler((options) => {
+            manualProductOptions = options || [];
+            manualProductMap.clear();
+            manualProductOptions.forEach((option) => {
+              if (option && option.token) {
+                manualProductMap.set(option.token, option);
+              }
+            });
+          })
+          .withFailureHandler(showError)
+          .getManualProductOptions();
+      }
+
       function populateSelect(select, options) {
         const placeholder = select.querySelector('option[value=""]');
         select.innerHTML = '';
@@ -380,30 +401,20 @@
         const buyerValue = buyerFilter.value;
         const supplierValue = supplierFilter.value;
         const hasFilter = buyerValue || supplierValue;
-        const pendingOrders = ordersCache.filter((order) => {
-          const status = normalizeText(order.status);
-          return !status || status.startsWith('PENDENTE');
-        });
+        const pendingOrders = ordersCache;
         const missingBuyer = pendingOrders.filter((order) => !String(order.buyerSelected || '').trim()).length;
         const missingSupplier = pendingOrders.filter((order) => !String(order.supplierSelected || '').trim()).length;
-        if (!hasFilter) {
-          updateDebugPanel(pendingOrders.length, 0, missingBuyer, missingSupplier, buyerValue, supplierValue);
-          renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
-          return;
-        }
-
-        const filtered = ordersCache
-          .filter((order) => {
-            const status = normalizeText(order.status);
-            return !status || status.startsWith('PENDENTE');
-          })
-          .filter((order) => matchesFilter(order, buyerValue, supplierValue));
+        const filtered = hasFilter
+          ? ordersCache.filter((order) => matchesFilter(order, buyerValue, supplierValue))
+          : ordersCache;
         console.log('[renderFilteredOrders] pending:', pendingOrders.length,
           'filtered:', filtered.length,
           'buyerFilter:', buyerValue,
           'supplierFilter:', supplierValue,
           'filtered ocs:', filtered.map((order) => order && order.oc));
-        const notMatching = pendingOrders.filter((order) => !matchesFilter(order, buyerValue, supplierValue));
+        const notMatching = hasFilter
+          ? pendingOrders.filter((order) => !matchesFilter(order, buyerValue, supplierValue))
+          : [];
         if (notMatching.length) {
           console.log('Pedidos pendentes fora do filtro (amostra):', notMatching.slice(0, 5).map((order) => ({
             oc: order.oc,
@@ -448,6 +459,9 @@
         if (!force && ordersContainer.contains(document.activeElement)) {
           return; // Evita refresh enquanto usuário edita campos.
         }
+        if (!force && pendingSaves > 0) {
+          return; // Evita refresh enquanto há salvamentos pendentes.
+        }
         google.script.run
           .withSuccessHandler((orders) => {
             ordersCache = orders || [];
@@ -462,7 +476,7 @@
             renderFilteredOrders();
           })
           .withFailureHandler(showError)
-          .getOrdersWithItems();
+          .getPendingOrdersWithItems(buyerFilter.value, supplierFilter.value);
       }
 
       function renderOrders(orders) {
@@ -513,6 +527,7 @@
             card.innerHTML = header;
             const headerEl = card.querySelector('.card-header');
             headerEl.appendChild(buildNfSection(normalized, card));
+            const commentKey = `comment:${normalized.oc}`;
             const commentWrap = document.createElement('div');
             commentWrap.className = 'nf-group';
             const commentLabel = document.createElement('label');
@@ -520,15 +535,26 @@
             const commentInput = document.createElement('textarea');
             commentInput.placeholder = 'Digite uma observação...';
             commentInput.rows = 3;
-            commentInput.value = normalized.comment || '';
-            const persistCommentDebounced = debounce(() => {
-              persistOrderComment(normalized, commentInput.value || '');
-            }, 500);
+            commentInput.value = getDraftValue(commentKey, normalized.comment || '');
+            const persistCommentDebounced = (() => {
+              let timer = null;
+              return () => {
+                if (timer) {
+                  clearTimeout(timer);
+                }
+                startPendingSave(commentKey);
+                timer = setTimeout(() => {
+                  persistOrderComment(normalized, commentInput.value || '', commentKey);
+                }, 500);
+              };
+            })();
             commentInput.addEventListener('blur', () => {
-              persistOrderComment(normalized, commentInput.value || '');
+              startPendingSave(commentKey);
+              persistOrderComment(normalized, commentInput.value || '', commentKey);
             });
             commentInput.addEventListener('input', () => {
               markUserEdit();
+              setDraftValue(commentKey, commentInput.value);
               persistCommentDebounced();
             });
             commentInput.addEventListener('focus', markUserEdit);
@@ -619,6 +645,36 @@
         lastUserEditAt = Date.now();
       }
 
+      function setDraftValue(key, value) {
+        draftState.set(key, value);
+      }
+
+      function getDraftValue(key, fallback) {
+        return draftState.has(key) ? draftState.get(key) : fallback;
+      }
+
+      function clearDraftByPrefix(prefix) {
+        Array.from(draftState.keys()).forEach((key) => {
+          if (key.startsWith(prefix)) {
+            draftState.delete(key);
+          }
+        });
+      }
+
+      function startPendingSave(key) {
+        if (!pendingSaveKeys.has(key)) {
+          pendingSaveKeys.add(key);
+          pendingSaves += 1;
+        }
+      }
+
+      function finishPendingSave(key) {
+        if (pendingSaveKeys.has(key)) {
+          pendingSaveKeys.delete(key);
+          pendingSaves = Math.max(0, pendingSaves - 1);
+        }
+      }
+
       function debounce(fn, delayMs) {
         let timer = null;
         return (...args) => {
@@ -663,8 +719,8 @@
         nfInputs.className = 'nf-inputs';
 
         const nfValues = splitNfValues(order.nf);
-        nfValues.forEach((value) => {
-          nfInputs.appendChild(buildNfInputRow(value, order, card));
+        nfValues.forEach((value, index) => {
+          nfInputs.appendChild(buildNfInputRow(value, order, card, index));
         });
 
         const nfToggle = document.createElement('label');
@@ -686,7 +742,7 @@
         }
         addButton.addEventListener('click', () => {
           markUserEdit();
-          const row = buildNfInputRow('', order, card);
+          const row = buildNfInputRow('', order, card, nfInputs.children.length);
           nfInputs.appendChild(row);
           const input = row.querySelector('input');
           if (input) {
@@ -707,15 +763,17 @@
         nfFreteInput.type = 'text';
         nfFreteInput.className = 'nf-frete-input';
         nfFreteInput.placeholder = 'NF Frete';
-        if (order.nfFrete !== null && order.nfFrete !== undefined) {
-          nfFreteInput.value = order.nfFrete;
-        }
+        nfFreteInput.value = getDraftValue(`nfFrete:${order.oc}`, order.nfFrete || '');
         if (String(order.nfFrete || '').toLowerCase() === 'não veio') {
           nfFreteInput.disabled = true;
         }
-        nfFreteInput.addEventListener('blur', () => persistNfFields(order, card));
+        nfFreteInput.addEventListener('blur', () => {
+          startPendingSave(`header:${order.oc}`);
+          persistNfFields(order, card);
+        });
         nfFreteInput.addEventListener('input', () => {
           markUserEdit();
+          setDraftValue(`nfFrete:${order.oc}`, nfFreteInput.value);
           persistNfFieldsDebounced(order, card);
         });
         nfFreteInput.addEventListener('focus', markUserEdit);
@@ -744,11 +802,11 @@
           <option value="VEIO">VEIO</option>
           <option value="NÃO VEIO">NÃO VEIO</option>
         `;
-        if (order.boleto) {
-          boletoSelect.value = order.boleto;
-        }
+        boletoSelect.value = getDraftValue(`boleto:${order.oc}`, order.boleto || '');
         boletoSelect.addEventListener('change', () => {
           markUserEdit();
+          setDraftValue(`boleto:${order.oc}`, boletoSelect.value);
+          startPendingSave(`header:${order.oc}`);
           persistNfFields(order, card);
         });
         boletoSelect.addEventListener('focus', markUserEdit);
@@ -763,12 +821,13 @@
           markUserEdit();
           if (nfCheckbox.checked) {
             nfInputs.innerHTML = '';
-            nfInputs.appendChild(buildNfInputRow('não veio', order, card));
+            nfInputs.appendChild(buildNfInputRow('não veio', order, card, 0));
             nfInputs.querySelectorAll('input').forEach((input) => {
               input.value = 'não veio';
               input.disabled = true;
             });
             addButton.disabled = true;
+            startPendingSave(`header:${order.oc}`);
             persistNfFields(order, card);
           } else {
             nfInputs.querySelectorAll('input').forEach((input) => {
@@ -778,6 +837,7 @@
               input.disabled = false;
             });
             addButton.disabled = false;
+            startPendingSave(`header:${order.oc}`);
             persistNfFields(order, card);
           }
         });
@@ -787,12 +847,16 @@
           if (nfFreteCheckbox.checked) {
             nfFreteInput.value = 'não veio';
             nfFreteInput.disabled = true;
+            setDraftValue(`nfFrete:${order.oc}`, nfFreteInput.value);
+            startPendingSave(`header:${order.oc}`);
             persistNfFields(order, card);
           } else {
             if (String(nfFreteInput.value).toLowerCase() === 'não veio') {
               nfFreteInput.value = '';
             }
             nfFreteInput.disabled = false;
+            setDraftValue(`nfFrete:${order.oc}`, nfFreteInput.value);
+            startPendingSave(`header:${order.oc}`);
             persistNfFields(order, card);
           }
         });
@@ -800,19 +864,22 @@
         return wrapper;
       }
 
-      function buildNfInputRow(value, order, card) {
+      function buildNfInputRow(value, order, card, index) {
         const row = document.createElement('div');
         row.className = 'nf-row';
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'nf-input';
         input.placeholder = 'NF';
-        if (value !== null && value !== undefined) {
-          input.value = value;
-        }
-        input.addEventListener('blur', () => persistNfFields(order, card));
+        const nfKey = `nf:${order.oc}:${index}`;
+        input.value = getDraftValue(nfKey, value || '');
+        input.addEventListener('blur', () => {
+          startPendingSave(`header:${order.oc}`);
+          persistNfFields(order, card);
+        });
         input.addEventListener('input', () => {
           markUserEdit();
+          setDraftValue(nfKey, input.value);
           persistNfFieldsDebounced(order, card);
         });
         input.addEventListener('focus', markUserEdit);
@@ -847,17 +914,33 @@
             order.nf = nfValue;
             order.nfFrete = nfFreteValue;
             order.boleto = boletoValue;
+            clearDraftByPrefix(`nf:${order.oc}:`);
+            draftState.delete(`nfFrete:${order.oc}`);
+            draftState.delete(`boleto:${order.oc}`);
+            finishPendingSave(`header:${order.oc}`);
           })
-          .withFailureHandler(showError)
+          .withFailureHandler((error) => {
+            finishPendingSave(`header:${order.oc}`);
+            showError(error);
+          })
           .updateOrderHeaderFields(order.oc, nfValue, nfFreteValue, boletoValue);
       }
 
-      function persistOrderComment(order, commentValue) {
+      function persistOrderComment(order, commentValue, draftKey) {
         google.script.run
           .withSuccessHandler(() => {
             order.comment = commentValue;
+            if (draftKey) {
+              draftState.delete(draftKey);
+              finishPendingSave(draftKey);
+            }
           })
-          .withFailureHandler(showError)
+          .withFailureHandler((error) => {
+            if (draftKey) {
+              finishPendingSave(draftKey);
+            }
+            showError(error);
+          })
           .updateOrderComment(order.oc, commentValue);
       }
 
@@ -868,6 +951,7 @@
           if (timers.has(key)) {
             clearTimeout(timers.get(key));
           }
+          startPendingSave(`header:${order.oc}`);
           timers.set(key, setTimeout(() => persistNfFields(order, card), 500));
         };
       })();
@@ -892,13 +976,13 @@
         `;
 
         const body = document.createElement('tbody');
-        const items = Array.isArray(order.items) ? order.items : [];
+        const items = Array.isArray(order.items)
+          ? order.items.slice().sort((a, b) => Number(a.lineNo) - Number(b.lineNo))
+          : [];
         if (!items.length) {
           const row = document.createElement('tr');
           row.innerHTML = '<td colspan="9" class="muted">Sem itens</td>';
           body.appendChild(row);
-          table.appendChild(body);
-          return table;
         }
         items.forEach((item) => {
           const row = document.createElement('tr');
@@ -911,17 +995,33 @@
             <td>${formatCurrency(item.total)}</td>
           `;
 
-          const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
-          const validityInput = buildInput('text', normalizeDateInput(item.validity), 'Validade dd/MM/yyyy');
-          const labelInput = buildInput('number', item.labels, 'Etiquetas');
+          const qtyKey = `item:${order.oc}:${item.lineNo}:qtyReceived`;
+          const validityKey = `item:${order.oc}:${item.lineNo}:validity`;
+          const labelsKey = `item:${order.oc}:${item.lineNo}:labels`;
+          const qtyInput = buildInput('number', getDraftValue(qtyKey, item.qtyReceived), 'Quantidade recebida');
+          const validityInput = buildInput('text', getDraftValue(validityKey, normalizeDateInput(item.validity)), 'Validade dd/MM/yyyy');
+          const labelInput = buildInput('number', getDraftValue(labelsKey, item.labels), 'Etiquetas');
 
-          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
-          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
-          labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
+          const saveKey = `item:${order.oc}:${item.lineNo}`;
+          qtyInput.addEventListener('blur', () => {
+            startPendingSave(saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+          });
+          validityInput.addEventListener('blur', () => {
+            startPendingSave(saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+          });
+          labelInput.addEventListener('blur', () => {
+            startPendingSave(saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+          });
 
           const handleItemInput = () => {
             markUserEdit();
-            saveItemDebounced(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex);
+            setDraftValue(qtyKey, qtyInput.value);
+            setDraftValue(validityKey, validityInput.value);
+            setDraftValue(labelsKey, labelInput.value);
+            saveItemDebounced(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
             updateOrderButtonStateForCard(card);
           };
           qtyInput.addEventListener('input', handleItemInput);
@@ -937,6 +1037,62 @@
 
           body.appendChild(row);
         });
+
+        const addRow = document.createElement('tr');
+        const codeCell = document.createElement('td');
+        const itemCell = document.createElement('td');
+        const unitCell = document.createElement('td');
+        const qtyCell = document.createElement('td');
+        const unitPriceCell = document.createElement('td');
+        const totalCell = document.createElement('td');
+        const qtyReceivedCell = document.createElement('td');
+        const validityCell = document.createElement('td');
+        const labelsCell = document.createElement('td');
+        const addSelect = document.createElement('select');
+        addSelect.innerHTML = '<option value="">Adicionar item...</option>';
+        manualProductOptions.forEach((option) => {
+          const opt = document.createElement('option');
+          opt.value = option.token;
+          opt.textContent = option.label;
+          addSelect.appendChild(opt);
+        });
+        addSelect.addEventListener('change', () => {
+          const selected = manualProductMap.get(addSelect.value);
+          codeCell.textContent = selected ? selected.code || '' : '';
+          unitCell.textContent = selected ? selected.unit || '' : '';
+        });
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.className = 'btn btn-secondary';
+        addButton.textContent = 'Adicionar linha';
+        addButton.addEventListener('click', () => {
+          const selected = manualProductMap.get(addSelect.value);
+          if (!selected) {
+            return;
+          }
+          markUserEdit();
+          google.script.run
+            .withSuccessHandler(() => {
+              addSelect.value = '';
+              codeCell.textContent = '';
+              unitCell.textContent = '';
+              refreshOrders(true);
+            })
+            .withFailureHandler(showError)
+            .addManualItemToOc(order.oc, selected.code, selected.name, selected.unit);
+        });
+        itemCell.appendChild(addSelect);
+        labelsCell.appendChild(addButton);
+        addRow.appendChild(codeCell);
+        addRow.appendChild(itemCell);
+        addRow.appendChild(unitCell);
+        addRow.appendChild(qtyCell);
+        addRow.appendChild(unitPriceCell);
+        addRow.appendChild(totalCell);
+        addRow.appendChild(qtyReceivedCell);
+        addRow.appendChild(validityCell);
+        addRow.appendChild(labelsCell);
+        body.appendChild(addRow);
 
         table.appendChild(body);
         return table;
@@ -958,25 +1114,37 @@
         return td;
       }
 
-      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) {
+      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey) {
         const qtyValue = qtyInput.value === '' ? '' : parseNumber(qtyInput.value);
         const validityValue = validityInput.value;
         const labelsValue = labelInput.value === '' ? '' : parseNumber(labelInput.value);
 
         google.script.run
-          .withFailureHandler(showError)
+          .withSuccessHandler(() => {
+            clearDraftByPrefix(`item:${oc}:${lineNo}:`);
+            if (saveKey) {
+              finishPendingSave(saveKey);
+            }
+          })
+          .withFailureHandler((error) => {
+            if (saveKey) {
+              finishPendingSave(saveKey);
+            }
+            showError(error);
+          })
           .updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue, rowIndex);
       }
 
       const saveItemDebounced = (() => {
         const timers = new Map();
-        return (oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) => {
+        return (oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey) => {
           const key = `${oc}-${lineNo}`;
           if (timers.has(key)) {
             clearTimeout(timers.get(key));
           }
+          startPendingSave(saveKey);
           timers.set(key, setTimeout(() => {
-            saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex);
+            saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey);
           }, 500));
         };
       })();
@@ -1036,10 +1204,8 @@
         google.script.run
           .withSuccessHandler((response) => {
             button.dataset.locked = 'true';
+            openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '');
             refreshOrders(true);
-            setTimeout(() => {
-              openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '');
-            }, 0);
           })
           .withFailureHandler((error) => {
             button.disabled = false;
@@ -1143,7 +1309,7 @@
         const normalizedUrl = url || '';
         pdfLink.href = normalizedUrl || '#';
         if (pdfMessage) {
-          pdfMessage.textContent = normalizedUrl ? '' : 'PDF não retornou URL.';
+          pdfMessage.textContent = normalizedUrl ? '' : 'PDF não retornou URL (ver logs do servidor).';
         }
         labelsModal.style.display = 'flex';
       }
