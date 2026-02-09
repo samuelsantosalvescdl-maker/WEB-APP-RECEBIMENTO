@@ -784,10 +784,6 @@ function sendToWebAppC_(order, items, pdfResult) {
   if (!parsed) {
     throw new Error(buildWebAppCError_(status, null, text));
   }
-
-  if (!parsed) {
-    throw new Error(buildWebAppCError_(status, null, text));
-  }
   const info = {
     scriptId: parsed.scriptId || '',
     expectedKeyLast3: parsed.expectedKeyLast3 || '',
