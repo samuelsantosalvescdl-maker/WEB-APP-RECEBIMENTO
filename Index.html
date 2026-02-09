@@ -315,6 +315,7 @@
       let lastUserEditAt = 0;
       let pendingSaves = 0;
       const pendingSaveKeys = new Set();
+      const draftRowsByOc = new Map();
       let manualProductOptions = [];
       const manualProductMap = new Map();
 
@@ -663,6 +664,30 @@
             draftState.delete(key);
           }
         });
+
+        ordersContainer.appendChild(frag);
+        updateGroupButtonState();
+        console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
+      }
+
+      function markUserEdit() {
+        lastUserEditAt = Date.now();
+      }
+
+      function setDraftValue(key, value) {
+        draftState.set(key, value);
+      }
+
+      function getDraftValue(key, fallback) {
+        return draftState.has(key) ? draftState.get(key) : fallback;
+      }
+
+      function clearDraftByPrefix(prefix) {
+        Array.from(draftState.keys()).forEach((key) => {
+          if (key.startsWith(prefix)) {
+            draftState.delete(key);
+          }
+        });
       }
 
       function startPendingSave(key) {
@@ -687,6 +712,68 @@
           }
           timer = setTimeout(() => fn(...args), delayMs);
         };
+      }
+
+      function startPendingSave(key) {
+        if (!pendingSaveKeys.has(key)) {
+          pendingSaveKeys.add(key);
+          pendingSaves += 1;
+        }
+      }
+
+      function finishPendingSave(key) {
+        if (pendingSaveKeys.has(key)) {
+          pendingSaveKeys.delete(key);
+          pendingSaves = Math.max(0, pendingSaves - 1);
+        }
+      }
+
+      function debounce(fn, delayMs) {
+        let timer = null;
+        return (...args) => {
+          if (timer) {
+            clearTimeout(timer);
+          }
+          timer = setTimeout(() => fn(...args), delayMs);
+        };
+      }
+
+      function getDraftRowsForOc(oc) {
+        if (!draftRowsByOc.has(oc)) {
+          draftRowsByOc.set(oc, []);
+        }
+        return draftRowsByOc.get(oc);
+      }
+
+      function createDraftRowState(oc) {
+        const draft = {
+          draftId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          token: '',
+          label: '',
+          code: '',
+          unit: '',
+          name: '',
+          inputValue: '',
+          createdAt: Date.now(),
+        };
+        getDraftRowsForOc(oc).push(draft);
+        return draft;
+      }
+
+      function updateDraftRowState(oc, draftId, updates) {
+        const drafts = getDraftRowsForOc(oc);
+        const idx = drafts.findIndex((entry) => entry.draftId === draftId);
+        if (idx === -1) {
+          return null;
+        }
+        drafts[idx] = Object.assign({}, drafts[idx], updates);
+        return drafts[idx];
+      }
+
+      function removeDraftRowState(oc, draftId) {
+        const drafts = getDraftRowsForOc(oc);
+        const next = drafts.filter((entry) => entry.draftId !== draftId);
+        draftRowsByOc.set(oc, next);
       }
 
       function buildDetailsTable(order) {
@@ -1045,17 +1132,7 @@
           body.appendChild(row);
         });
 
-        const controlRow = document.createElement('tr');
-        const controlCell = document.createElement('td');
-        controlCell.colSpan = 9;
-        const controlButton = document.createElement('button');
-        controlButton.type = 'button';
-        controlButton.className = 'btn btn-secondary';
-        controlButton.textContent = '+ Adicionar item';
-        controlCell.appendChild(controlButton);
-        controlRow.appendChild(controlCell);
-
-        const createDraftRow = () => {
+        const renderDraftRow = (draft) => {
           const draftRow = document.createElement('tr');
           draftRow.className = 'draft-row';
           const codeCell = document.createElement('td');
@@ -1073,6 +1150,7 @@
           const comboInput = document.createElement('input');
           comboInput.type = 'text';
           comboInput.placeholder = 'Buscar item...';
+          comboInput.value = draft.token ? draft.label : (draft.inputValue || '');
           const optionsList = document.createElement('div');
           optionsList.style.border = '1px solid #ccc';
           optionsList.style.background = '#fff';
@@ -1104,21 +1182,42 @@
             if (!option) {
               return;
             }
-            comboInput.value = option.label;
-            codeCell.textContent = option.code || '';
-            unitCell.textContent = option.unit || '';
-            markUserEdit();
-            google.script.run
-              .withSuccessHandler(() => {
-                draftRow.remove();
-                refreshOrders();
-              })
-              .withFailureHandler(showError)
-              .addManualItemToOc(order.oc, option.code, option.name, option.unit);
+            const updated = updateDraftRowState(order.oc, draft.draftId, {
+              token: option.token,
+              label: option.label,
+              code: option.code || '',
+              unit: option.unit || '',
+              name: option.name || '',
+              inputValue: option.label,
+            });
+            comboInput.value = updated.label;
+            codeCell.textContent = updated.code || '';
+            unitCell.textContent = updated.unit || '';
+            confirmButton.disabled = !updated.token;
+            optionsList.style.display = 'none';
           };
 
           comboInput.addEventListener('input', () => {
             markUserEdit();
+            const currentDraft = getDraftRowsForOc(order.oc)
+              .find((entry) => entry.draftId === draft.draftId);
+            const normalizedInput = normalizeText(comboInput.value);
+            const shouldClearToken = currentDraft && currentDraft.token
+              && normalizeText(currentDraft.label || '') !== normalizedInput;
+            updateDraftRowState(order.oc, draft.draftId, {
+              inputValue: comboInput.value,
+              token: shouldClearToken ? '' : (currentDraft && currentDraft.token),
+              label: shouldClearToken ? '' : (currentDraft && currentDraft.label),
+              code: shouldClearToken ? '' : (currentDraft && currentDraft.code),
+              unit: shouldClearToken ? '' : (currentDraft && currentDraft.unit),
+              name: shouldClearToken ? '' : (currentDraft && currentDraft.name),
+            });
+            if (shouldClearToken) {
+              codeCell.textContent = '';
+              unitCell.textContent = '';
+            }
+            confirmButton.disabled = !getDraftRowsForOc(order.oc)
+              .find((entry) => entry.draftId === draft.draftId).token;
             renderOptions(comboInput.value);
           });
           comboInput.addEventListener('focus', () => {
@@ -1138,16 +1237,58 @@
             }
           });
 
+          const confirmButton = document.createElement('button');
+          confirmButton.type = 'button';
+          confirmButton.className = 'btn btn-primary';
+          confirmButton.textContent = '✅';
+          confirmButton.disabled = !draft.token;
+
           const removeButton = document.createElement('button');
           removeButton.type = 'button';
           removeButton.className = 'btn btn-secondary';
-          removeButton.textContent = 'x';
-          removeButton.addEventListener('click', () => draftRow.remove());
+          removeButton.textContent = '🗑️';
+          removeButton.addEventListener('click', () => {
+            removeDraftRowState(order.oc, draft.draftId);
+            draftRow.remove();
+          });
+
+          confirmButton.addEventListener('click', () => {
+            const currentDraft = getDraftRowsForOc(order.oc)
+              .find((entry) => entry.draftId === draft.draftId);
+            if (!currentDraft || !currentDraft.token) {
+              return;
+            }
+            confirmButton.disabled = true;
+            comboInput.disabled = true;
+            removeButton.disabled = true;
+            confirmButton.textContent = 'Salvando...';
+            const saveKey = `manualAdd:${order.oc}:${draft.draftId}`;
+            startPendingSave(saveKey);
+            google.script.run
+              .withSuccessHandler(() => {
+                finishPendingSave(saveKey);
+                removeDraftRowState(order.oc, draft.draftId);
+                refreshOrders();
+              })
+              .withFailureHandler((error) => {
+                finishPendingSave(saveKey);
+                confirmButton.disabled = !currentDraft.token;
+                comboInput.disabled = false;
+                removeButton.disabled = false;
+                confirmButton.textContent = '✅';
+                showError(error);
+              })
+              .addManualItemToOc(order.oc, currentDraft.code, currentDraft.name, currentDraft.unit);
+          });
 
           inputWrap.appendChild(comboInput);
           inputWrap.appendChild(optionsList);
           itemCell.appendChild(inputWrap);
+          labelsCell.appendChild(confirmButton);
           labelsCell.appendChild(removeButton);
+
+          codeCell.textContent = draft.code || '';
+          unitCell.textContent = draft.unit || '';
 
           draftRow.appendChild(codeCell);
           draftRow.appendChild(itemCell);
@@ -1158,13 +1299,25 @@
           draftRow.appendChild(qtyReceivedCell);
           draftRow.appendChild(validityCell);
           draftRow.appendChild(labelsCell);
-          body.insertBefore(draftRow, controlRow);
+          body.appendChild(draftRow);
         };
 
-        controlButton.addEventListener('click', () => {
-          createDraftRow();
-        });
+        const drafts = getDraftRowsForOc(order.oc);
+        drafts.forEach((draft) => renderDraftRow(draft));
 
+        const controlRow = document.createElement('tr');
+        const controlCell = document.createElement('td');
+        controlCell.colSpan = 9;
+        const controlButton = document.createElement('button');
+        controlButton.type = 'button';
+        controlButton.className = 'btn btn-secondary';
+        controlButton.textContent = '+ Adicionar item';
+        controlButton.addEventListener('click', () => {
+          createDraftRowState(order.oc);
+          renderOrders(ordersCache);
+        });
+        controlCell.appendChild(controlButton);
+        controlRow.appendChild(controlCell);
         body.appendChild(controlRow);
 
         table.appendChild(body);
