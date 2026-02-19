@@ -97,6 +97,40 @@
         font-size: 14px;
         margin-top: 8px;
       }
+      .nf-section {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: 12px;
+      }
+      .nf-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 220px;
+      }
+      .nf-inputs {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .nf-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .nf-row input {
+        flex: 1;
+      }
+      .nf-add {
+        border: 1px solid #cbd5e0;
+        background: #edf2f7;
+        color: #2d3748;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
       .details-table {
         width: 100%;
         border-collapse: collapse;
@@ -225,9 +259,40 @@
           <label for="labelHeightCm">Altura etiqueta (cm)</label>
           <input id="labelHeightCm" type="text" placeholder="Ex: 3,0">
         </div>
+        <div class="filter-group">
+          <label>&nbsp;</label>
+          <button id="groupSelected" class="btn btn-secondary" type="button" disabled>Agrupar selecionados</button>
+        </div>
       </div>
     </div>
     <div class="container">
+      <div class="card" id="registerCard">
+        <div class="card-title">Registrar pedido</div>
+        <div class="summary" style="margin-top:12px;">
+          <div><label>OC<br><input id="regOc" type="text"></label></div>
+          <div><label>Comprador<br><input id="regBuyer" type="text"></label></div>
+          <div><label>Fornecedor<br><input id="regSupplier" type="text"></label></div>
+          <div style="min-width:320px;"><label>Observação<br><input id="regComment" type="text"></label></div>
+        </div>
+        <div style="margin-top:12px;">
+          <label>Itens (JSON array)</label>
+          <textarea id="regItemsJson" rows="4" style="width:100%;">[{"lineNo":1,"code":"","item":"","unit":"","qty":1,"unitPrice":0,"total":0,"qtyReceived":"","validity":"","labels":""}]</textarea>
+        </div>
+        <div class="actions" style="justify-content:flex-start;">
+          <button id="registerOrderBtn" class="btn btn-primary" type="button">Registrar pedido</button>
+          <div id="registerMessage" class="message" style="margin-top:0;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="container">
+      <div id="debugPanel" class="empty-state" style="margin-bottom: 16px;">
+        <strong>DEBUG</strong>
+        <div>Carregados: <span id="debugLoaded">0</span></div>
+        <div>Pendentes: <span id="debugPending">0</span></div>
+        <div>No filtro: <span id="debugFiltered">0</span></div>
+        <div>Buyer vazio: <span id="debugMissingBuyer">0</span> | Supplier vazio: <span id="debugMissingSupplier">0</span></div>
+        <div>Buyer filtro: <span id="debugBuyer">-</span> | Supplier filtro: <span id="debugSupplier">-</span></div>
+      </div>
       <div id="orders"></div>
     </div>
     <div id="labelsModal" class="modal-backdrop">
@@ -237,6 +302,7 @@
           Acessar PDF:
           <a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a>
         </p>
+        <p id="pdfMessage" class="muted"></p>
         <div class="modal-actions">
           <button id="closeModal" class="btn btn-primary" type="button">Ok</button>
         </div>
@@ -249,24 +315,55 @@
       const supplierFilter = document.getElementById('supplierFilter');
       const labelWidthInput = document.getElementById('labelWidthCm');
       const labelHeightInput = document.getElementById('labelHeightCm');
+      const groupSelectedButton = document.getElementById('groupSelected');
       const labelsModal = document.getElementById('labelsModal');
       const pdfLink = document.getElementById('pdfLink');
+      const pdfMessage = document.getElementById('pdfMessage');
       const printPdf = document.getElementById('printPdf');
       const closeModal = document.getElementById('closeModal');
+      const debugLoaded = document.getElementById('debugLoaded');
+      const debugPending = document.getElementById('debugPending');
+      const debugFiltered = document.getElementById('debugFiltered');
+      const debugMissingBuyer = document.getElementById('debugMissingBuyer');
+      const debugMissingSupplier = document.getElementById('debugMissingSupplier');
+      const debugBuyer = document.getElementById('debugBuyer');
+      const debugSupplier = document.getElementById('debugSupplier');
+      const regOc = document.getElementById('regOc');
+      const regBuyer = document.getElementById('regBuyer');
+      const regSupplier = document.getElementById('regSupplier');
+      const regComment = document.getElementById('regComment');
+      const regItemsJson = document.getElementById('regItemsJson');
+      const registerOrderBtn = document.getElementById('registerOrderBtn');
+      const registerMessage = document.getElementById('registerMessage');
       let ordersCache = [];
+      const selectedGroupOcs = new Set();
+      const draftState = new Map();
+      let lastUserEditAt = 0;
+      let pendingSaves = 0;
+      const pendingSaveKeys = new Set();
+      const draftRowsByOc = new Map();
+      let manualProductOptions = [];
+      const manualProductMap = new Map();
 
       function init() {
         loadFilterOptions();
-        google.script.run
-          .withSuccessHandler((orders) => {
-            ordersCache = orders || [];
-            renderFilteredOrders();
-          })
-          .withFailureHandler(showError)
-          .getOrdersWithItems();
+        loadManualProductOptions(() => {
+          refreshOrders();
+          setInterval(refreshOrders, 15000);
+        });
 
         buyerFilter.addEventListener('change', renderFilteredOrders);
         supplierFilter.addEventListener('change', renderFilteredOrders);
+        labelWidthInput.addEventListener('input', markUserEdit);
+        labelWidthInput.addEventListener('focus', markUserEdit);
+        labelHeightInput.addEventListener('input', markUserEdit);
+        labelHeightInput.addEventListener('focus', markUserEdit);
+        if (groupSelectedButton) {
+          groupSelectedButton.addEventListener('click', handleGroupSelected);
+        }
+        if (registerOrderBtn) {
+          registerOrderBtn.addEventListener('click', handleRegisterOrder);
+        }
         closeModal.addEventListener('click', closeLabelsModal);
         labelsModal.addEventListener('click', (event) => {
           if (event.target === labelsModal) {
@@ -281,6 +378,7 @@
             window.open(pdfLink.href, '_blank', 'noopener');
           });
         }
+
       }
 
       function loadFilterOptions() {
@@ -293,6 +391,24 @@
           .withSuccessHandler((options) => populateSelect(supplierFilter, options))
           .withFailureHandler(showError)
           .getSupplierOptions();
+      }
+
+      function loadManualProductOptions(onComplete) {
+        google.script.run
+          .withSuccessHandler((options) => {
+            manualProductOptions = options || [];
+            manualProductMap.clear();
+            manualProductOptions.forEach((option) => {
+              if (option && option.token) {
+                manualProductMap.set(option.token, option);
+              }
+            });
+            if (onComplete) {
+              onComplete();
+            }
+          })
+          .withFailureHandler(showError)
+          .getManualProductOptions();
       }
 
       function populateSelect(select, options) {
@@ -315,18 +431,72 @@
         return option;
       }
 
+      function handleRegisterOrder() {
+        if (!registerOrderBtn) {
+          return;
+        }
+        registerMessage.textContent = '';
+        let items = [];
+        try {
+          items = JSON.parse(regItemsJson.value || '[]');
+        } catch (error) {
+          registerMessage.textContent = 'JSON de itens inválido.';
+          return;
+        }
+
+        const payload = {
+          oc: regOc.value,
+          buyerSelected: regBuyer.value,
+          supplierSelected: regSupplier.value,
+          comment: regComment.value,
+          sentAt: new Date().toISOString(),
+          items,
+        };
+
+        registerOrderBtn.disabled = true;
+        google.script.run
+          .withSuccessHandler((response) => {
+            registerOrderBtn.disabled = false;
+            if (response && response.duplicate) {
+              registerMessage.textContent = 'Pedido já existente (duplicado).';
+            } else {
+              registerMessage.textContent = 'Pedido registrado com sucesso.';
+              refreshOrders();
+            }
+          })
+          .withFailureHandler((error) => {
+            registerOrderBtn.disabled = false;
+            registerMessage.textContent = error.message || 'Falha ao registrar pedido.';
+          })
+          .apiRegisterOrder(payload);
+      }
+
       function renderFilteredOrders() {
         const buyerValue = buyerFilter.value;
         const supplierValue = supplierFilter.value;
         const hasFilter = buyerValue || supplierValue;
-        if (!hasFilter) {
-          renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
-          return;
+        const pendingOrders = ordersCache;
+        const missingBuyer = pendingOrders.filter((order) => !String(order.buyerSelected || '').trim()).length;
+        const missingSupplier = pendingOrders.filter((order) => !String(order.supplierSelected || '').trim()).length;
+        const filtered = hasFilter
+          ? ordersCache.filter((order) => matchesFilter(order, buyerValue, supplierValue))
+          : ordersCache;
+        console.log('[renderFilteredOrders] pending:', pendingOrders.length,
+          'filtered:', filtered.length,
+          'buyerFilter:', buyerValue,
+          'supplierFilter:', supplierValue,
+          'filtered ocs:', filtered.map((order) => order && order.oc));
+        const notMatching = hasFilter
+          ? pendingOrders.filter((order) => !matchesFilter(order, buyerValue, supplierValue))
+          : [];
+        if (notMatching.length) {
+          console.log('Pedidos pendentes fora do filtro (amostra):', notMatching.slice(0, 5).map((order) => ({
+            oc: order.oc,
+            buyerSelected: order.buyerSelected,
+            supplierSelected: order.supplierSelected,
+          })));
         }
-
-        const filtered = ordersCache
-          .filter((order) => order.status !== 'RECEBIDO')
-          .filter((order) => matchesFilter(order, buyerValue, supplierValue));
+        updateDebugPanel(pendingOrders.length, filtered.length, missingBuyer, missingSupplier, buyerValue, supplierValue);
         if (!filtered.length) {
           renderEmptyState('Nenhum pedido se adequou ao filtro.');
           return;
@@ -339,78 +509,312 @@
         ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
       }
 
+      function updateDebugPanel(pendingCount, filteredCount, missingBuyer, missingSupplier, buyerValue, supplierValue) {
+        if (!debugLoaded) {
+          return;
+        }
+        debugLoaded.textContent = ordersCache.length;
+        debugPending.textContent = pendingCount;
+        debugFiltered.textContent = filteredCount;
+        if (debugMissingBuyer) {
+          debugMissingBuyer.textContent = missingBuyer;
+        }
+        if (debugMissingSupplier) {
+          debugMissingSupplier.textContent = missingSupplier;
+        }
+        debugBuyer.textContent = buyerValue || '-';
+        debugSupplier.textContent = supplierValue || '-';
+      }
+
+      function refreshOrders(force) {
+        if (!force && Date.now() - lastUserEditAt < 5000) {
+          return; // Evita refresh durante edição recente.
+        }
+        if (!force && ordersContainer.contains(document.activeElement)) {
+          return; // Evita refresh enquanto usuário edita campos.
+        }
+        if (!force && pendingSaves > 0) {
+          return; // Evita refresh enquanto há salvamentos pendentes.
+        }
+        google.script.run
+          .withSuccessHandler((orders) => {
+            ordersCache = orders || [];
+            const existing = new Set(ordersCache.map((order) => String((order && order.oc) || '').trim()));
+            for (const oc of Array.from(selectedGroupOcs)) {
+              if (!existing.has(oc)) {
+                selectedGroupOcs.delete(oc);
+              }
+            }
+            console.log('[refreshOrders] total:', (ordersCache || []).length,
+              'ocs:', (ordersCache || []).map((order) => order && order.oc));
+            renderFilteredOrders();
+          })
+          .withFailureHandler(showError)
+          .getPendingOrdersWithItems(buyerFilter.value, supplierFilter.value);
+      }
+
       function renderOrders(orders) {
+        console.log('[renderOrders] input size:', orders.length, 'ocs:', orders.map((order) => order && order.oc));
         ordersContainer.innerHTML = '';
-        if (!orders.length) {
+        if (!orders || !orders.length) {
           ordersContainer.innerHTML = '<div class="card">Nenhum pedido encontrado.</div>';
+          console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
           return;
         }
 
-        orders.forEach((order) => {
-          const card = document.createElement('div');
-          card.className = 'card';
-          card.dataset.oc = order.oc;
+        const frag = document.createDocumentFragment();
 
-          const statusClass = order.status === 'RECEBIDO'
-            ? 'status'
-            : order.status && order.status.startsWith('CANCEL')
-              ? 'status cancel'
-              : 'status pending';
+        orders.forEach((order, idx) => {
+          try {
+            const normalized = normalizeOrder_(order);
+            console.log('[renderOrders] rendering idx:', idx, 'oc:', normalized.oc);
 
-          const header = `
-            <div class="card-header">
-              <div class="card-title">Confirmação de Pedido</div>
-              <div class="highlight-row">
-                <div>OC: ${escapeHtml(order.oc)}</div>
-                <div>Enviado em: ${formatDate(order.sentAt)}</div>
-                <div>Status: <span class="${statusClass}">${escapeHtml(order.status || 'PENDENTE')}</span></div>
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.dataset.oc = normalized.oc;
+
+            const statusText = String(normalized.status || '');
+            const statusNormalized = normalizeText(statusText);
+            const statusClass = statusNormalized.startsWith('RECEBIDO')
+              ? 'status'
+              : statusNormalized.includes('CANCEL')
+                ? 'status cancel'
+                : 'status pending';
+
+            const header = `
+              <div class="card-header">
+                <div class="card-title">Confirmação de Pedido</div>
+                <div class="highlight-row">
+                  <div>OC: ${escapeHtml(normalized.groupOcs || normalized.oc)}</div>
+                  <div>Enviado em: ${escapeHtml(normalized.groupSentAts || formatDate(normalized.sentAt))}</div>
+                  <div>Status: <span class="${statusClass}">${escapeHtml(normalized.status || 'PENDENTE')}</span></div>
+                </div>
+                <div class="summary">
+                  <div><strong>Comprador:</strong> ${escapeHtml(normalized.buyerSelected || '-')}</div>
+                  <div><strong>Fornecedor:</strong> ${escapeHtml(normalized.supplierSelected || '-')}</div>
+                  <div><strong>Qtd total:</strong> ${normalized.qtyTotal || 0}</div>
+                  <div><strong>Valor total:</strong> R$ ${formatCurrency(normalized.valueTotal)}</div>
+                </div>
               </div>
-              <div class="summary">
-                <div><strong>Comprador:</strong> ${escapeHtml(order.buyerSelected || '-')}</div>
-                <div><strong>Fornecedor:</strong> ${escapeHtml(order.supplierSelected || '-')}</div>
-                <div><strong>Qtd total:</strong> ${order.qtyTotal || 0}</div>
-                <div><strong>Valor total:</strong> R$ ${formatCurrency(order.valueTotal)}</div>
+            `;
+
+            card.innerHTML = header;
+            const headerEl = card.querySelector('.card-header');
+            headerEl.appendChild(buildNfSection(normalized, card));
+            const commentKey = `comment:${normalized.oc}`;
+            const commentWrap = document.createElement('div');
+            commentWrap.className = 'nf-group';
+            const commentLabel = document.createElement('label');
+            commentLabel.textContent = 'Observação';
+            const commentInput = document.createElement('textarea');
+            commentInput.placeholder = 'Digite uma observação...';
+            commentInput.rows = 3;
+            commentInput.value = getDraftValue(commentKey, normalized.comment || '');
+            const persistCommentDebounced = (() => {
+              let timer = null;
+              return () => {
+                if (timer) {
+                  clearTimeout(timer);
+                }
+                startPendingSave(commentKey);
+                timer = setTimeout(() => {
+                  persistOrderComment(normalized, commentInput.value || '', commentKey);
+                }, 500);
+              };
+            })();
+            commentInput.addEventListener('blur', () => {
+              startPendingSave(commentKey);
+              persistOrderComment(normalized, commentInput.value || '', commentKey);
+            });
+            commentInput.addEventListener('input', () => {
+              markUserEdit();
+              setDraftValue(commentKey, commentInput.value);
+              persistCommentDebounced();
+            });
+            commentInput.addEventListener('focus', markUserEdit);
+            if (!normalizeText(normalized.status).startsWith('PENDENTE')) {
+              commentInput.disabled = true;
+            }
+            commentWrap.appendChild(commentLabel);
+            commentWrap.appendChild(commentInput);
+            headerEl.appendChild(commentWrap);
+            if (normalizeText(normalized.status).startsWith('PENDENTE')) {
+              const selectRow = document.createElement('div');
+              const selectInput = document.createElement('input');
+              selectInput.type = 'checkbox';
+              selectInput.checked = selectedGroupOcs.has(normalized.oc);
+              selectInput.addEventListener('change', () => {
+                if (selectInput.checked) {
+                  selectedGroupOcs.add(normalized.oc);
+                } else {
+                  selectedGroupOcs.delete(normalized.oc);
+                }
+                updateGroupButtonState();
+              });
+              const selectLabel = document.createElement('label');
+              selectLabel.style.marginLeft = '8px';
+              selectLabel.textContent = 'Selecionar para agrupar';
+              selectRow.appendChild(selectInput);
+              selectRow.appendChild(selectLabel);
+              headerEl.appendChild(selectRow);
+            }
+
+            if (normalized.buyerDetails.length || normalized.supplierDetails.length) {
+              const detailsTable = buildDetailsTable(normalized);
+              card.appendChild(detailsTable);
+            }
+
+            const table = buildItemsTable(normalized, card);
+            card.appendChild(table);
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+
+            const message = document.createElement('div');
+            message.className = 'message';
+
+            const receivedButton = document.createElement('button');
+            receivedButton.className = 'btn btn-primary';
+            receivedButton.textContent = 'Recebido';
+            receivedButton.disabled = normalizeText(normalized.status) === 'RECEBIDO' || !isOrderComplete(normalized);
+            receivedButton.dataset.locked = normalizeText(normalized.status) === 'RECEBIDO' ? 'true' : 'false';
+            receivedButton.addEventListener('click', () => handleReceived(normalized, receivedButton, message));
+
+            const cancelButton = document.createElement('button');
+            cancelButton.className = 'btn btn-secondary';
+            cancelButton.textContent = 'Cancelar pedido';
+            cancelButton.addEventListener('click', () => handleCancel(normalized));
+
+            actions.appendChild(cancelButton);
+            actions.appendChild(receivedButton);
+
+            card.appendChild(actions);
+            card.appendChild(message);
+            frag.appendChild(card);
+
+            updateOrderButtonStateForCard(card);
+          } catch (err) {
+            console.error('[renderOrders] erro ao renderizar OC:', order && order.oc, err);
+            const fallback = document.createElement('div');
+            fallback.className = 'card';
+            fallback.innerHTML = `
+              <div class="card-header">
+                <div class="card-title">Falha ao renderizar pedido</div>
+                <div class="highlight-row">
+                  <div>OC: ${escapeHtml(String((order && order.oc) || ''))}</div>
+                </div>
+                <div class="message">Erro no console. Este pedido não conseguiu renderizar.</div>
               </div>
-            </div>
-          `;
-
-          card.innerHTML = header;
-
-          if (order.buyerDetails.length || order.supplierDetails.length) {
-            const detailsTable = buildDetailsTable(order);
-            card.appendChild(detailsTable);
+            `;
+            frag.appendChild(fallback);
           }
-
-          const table = buildItemsTable(order);
-          card.appendChild(table);
-
-          const actions = document.createElement('div');
-          actions.className = 'actions';
-
-          const message = document.createElement('div');
-          message.className = 'message';
-
-          const receivedButton = document.createElement('button');
-          receivedButton.className = 'btn btn-primary';
-          receivedButton.textContent = 'Recebido';
-          receivedButton.disabled = order.status === 'RECEBIDO' || !isOrderComplete(order);
-          receivedButton.dataset.locked = order.status === 'RECEBIDO' ? 'true' : 'false';
-          receivedButton.addEventListener('click', () => handleReceived(order, receivedButton, message));
-
-          const cancelButton = document.createElement('button');
-          cancelButton.className = 'btn btn-secondary';
-          cancelButton.textContent = 'Cancelar pedido';
-          cancelButton.addEventListener('click', () => handleCancel(order));
-
-          actions.appendChild(cancelButton);
-          actions.appendChild(receivedButton);
-
-          card.appendChild(actions);
-          card.appendChild(message);
-          ordersContainer.appendChild(card);
-
-          updateOrderButtonState(order.oc);
         });
+
+        ordersContainer.appendChild(frag);
+        updateGroupButtonState();
+        console.log('[renderOrders] dom cards:', ordersContainer.querySelectorAll('.card').length);
+      }
+
+      function markUserEdit() {
+        lastUserEditAt = Date.now();
+      }
+
+      function setDraftValue(key, value) {
+        draftState.set(key, value);
+      }
+
+      function getDraftValue(key, fallback) {
+        return draftState.has(key) ? draftState.get(key) : fallback;
+      }
+
+      function clearDraftByPrefix(prefix) {
+        Array.from(draftState.keys()).forEach((key) => {
+          if (key.startsWith(prefix)) {
+            draftState.delete(key);
+          }
+        });
+      }
+
+      function startPendingSave(key) {
+        if (!pendingSaveKeys.has(key)) {
+          pendingSaveKeys.add(key);
+          pendingSaves += 1;
+        }
+      }
+
+      function finishPendingSave(key) {
+        if (pendingSaveKeys.has(key)) {
+          pendingSaveKeys.delete(key);
+          pendingSaves = Math.max(0, pendingSaves - 1);
+        }
+      }
+
+      function debounce(fn, delayMs) {
+        let timer = null;
+        return (...args) => {
+          if (timer) {
+            clearTimeout(timer);
+          }
+          timer = setTimeout(() => fn(...args), delayMs);
+        };
+      }
+
+      function getDraftRowsForOc(oc) {
+        if (!draftRowsByOc.has(oc)) {
+          draftRowsByOc.set(oc, []);
+        }
+        return draftRowsByOc.get(oc);
+      }
+
+      function createDraftRowState(oc) {
+        const draft = {
+          draftId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          token: '',
+          label: '',
+          code: '',
+          unit: '',
+          name: '',
+          inputValue: '',
+          createdAt: Date.now(),
+        };
+        getDraftRowsForOc(oc).push(draft);
+        return draft;
+      }
+
+      function updateDraftRowState(oc, draftId, updates) {
+        const drafts = getDraftRowsForOc(oc);
+        const idx = drafts.findIndex((entry) => entry.draftId === draftId);
+        if (idx === -1) {
+          return null;
+        }
+        drafts[idx] = Object.assign({}, drafts[idx], updates);
+        return drafts[idx];
+      }
+
+      function removeDraftRowState(oc, draftId) {
+        const drafts = getDraftRowsForOc(oc);
+        const next = drafts.filter((entry) => entry.draftId !== draftId);
+        draftRowsByOc.set(oc, next);
+      }
+
+      function patchOrderCache_(oc, patch) {
+        const target = ordersCache.find((order) => String(order.oc) === String(oc));
+        if (!target) {
+          return;
+        }
+        Object.assign(target, patch);
+      }
+
+      function patchItemCache_(oc, lineNo, patch) {
+        const target = ordersCache.find((order) => String(order.oc) === String(oc));
+        if (!target || !Array.isArray(target.items)) {
+          return;
+        }
+        const itemTarget = target.items.find((item) => Number(item.lineNo) === Number(lineNo));
+        if (!itemTarget) {
+          return;
+        }
+        Object.assign(itemTarget, patch);
       }
 
       function buildDetailsTable(order) {
@@ -435,7 +839,255 @@
         return wrapper;
       }
 
-      function buildItemsTable(order) {
+      function buildNfSection(order, card) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'nf-section';
+
+        const nfGroup = document.createElement('div');
+        nfGroup.className = 'nf-group';
+        const nfLabel = document.createElement('label');
+        nfLabel.textContent = 'NF';
+        const nfInputs = document.createElement('div');
+        nfInputs.className = 'nf-inputs';
+
+        const nfValues = splitNfValues(order.nf);
+        nfValues.forEach((value, index) => {
+          nfInputs.appendChild(buildNfInputRow(value, order, card, index));
+        });
+
+        const nfToggle = document.createElement('label');
+        nfToggle.style.display = 'flex';
+        nfToggle.style.alignItems = 'center';
+        nfToggle.style.gap = '6px';
+        const nfCheckbox = document.createElement('input');
+        nfCheckbox.type = 'checkbox';
+        nfCheckbox.checked = String(order.nf || '').toLowerCase() === 'não veio';
+        nfToggle.appendChild(nfCheckbox);
+        nfToggle.appendChild(document.createTextNode('Não veio'));
+
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.className = 'nf-add';
+        addButton.textContent = '+';
+        if (nfCheckbox.checked) {
+          addButton.disabled = true;
+        }
+        addButton.addEventListener('click', () => {
+          markUserEdit();
+          const row = buildNfInputRow('', order, card, nfInputs.children.length);
+          nfInputs.appendChild(row);
+          const input = row.querySelector('input');
+          if (input) {
+            input.focus();
+          }
+        });
+
+        nfGroup.appendChild(nfLabel);
+        nfGroup.appendChild(nfInputs);
+        nfGroup.appendChild(nfToggle);
+        nfGroup.appendChild(addButton);
+
+        const nfFreteGroup = document.createElement('div');
+        nfFreteGroup.className = 'nf-group';
+        const nfFreteLabel = document.createElement('label');
+        nfFreteLabel.textContent = 'NF Frete';
+        const nfFreteInput = document.createElement('input');
+        nfFreteInput.type = 'text';
+        nfFreteInput.className = 'nf-frete-input';
+        nfFreteInput.placeholder = 'NF Frete';
+        nfFreteInput.value = getDraftValue(`nfFrete:${order.oc}`, order.nfFrete || '');
+        if (String(order.nfFrete || '').toLowerCase() === 'não veio') {
+          nfFreteInput.disabled = true;
+        }
+        nfFreteInput.addEventListener('blur', () => {
+          startPendingSave(`header:${order.oc}`);
+          persistNfFields(order, card);
+        });
+        nfFreteInput.addEventListener('input', () => {
+          markUserEdit();
+          setDraftValue(`nfFrete:${order.oc}`, nfFreteInput.value);
+          persistNfFieldsDebounced(order, card);
+        });
+        nfFreteInput.addEventListener('focus', markUserEdit);
+
+        const nfFreteToggle = document.createElement('label');
+        nfFreteToggle.style.display = 'flex';
+        nfFreteToggle.style.alignItems = 'center';
+        nfFreteToggle.style.gap = '6px';
+        const nfFreteCheckbox = document.createElement('input');
+        nfFreteCheckbox.type = 'checkbox';
+        nfFreteCheckbox.checked = String(order.nfFrete || '').toLowerCase() === 'não veio';
+        nfFreteToggle.appendChild(nfFreteCheckbox);
+        nfFreteToggle.appendChild(document.createTextNode('Não veio'));
+
+        nfFreteGroup.appendChild(nfFreteLabel);
+        nfFreteGroup.appendChild(nfFreteInput);
+        nfFreteGroup.appendChild(nfFreteToggle);
+
+        const boletoGroup = document.createElement('div');
+        boletoGroup.className = 'nf-group';
+        const boletoLabel = document.createElement('label');
+        boletoLabel.textContent = 'Boleto';
+        const boletoSelect = document.createElement('select');
+        boletoSelect.classList.add('js-boleto-select');
+        boletoSelect.innerHTML = `
+          <option value="">Selecione...</option>
+          <option value="VEIO">VEIO</option>
+          <option value="NÃO VEIO">NÃO VEIO</option>
+        `;
+        boletoSelect.value = getDraftValue(`boleto:${order.oc}`, order.boleto || '');
+        boletoSelect.addEventListener('change', () => {
+          markUserEdit();
+          setDraftValue(`boleto:${order.oc}`, boletoSelect.value);
+          startPendingSave(`header:${order.oc}`);
+          persistNfFields(order, card);
+        });
+        boletoSelect.addEventListener('focus', markUserEdit);
+        boletoGroup.appendChild(boletoLabel);
+        boletoGroup.appendChild(boletoSelect);
+
+        wrapper.appendChild(nfGroup);
+        wrapper.appendChild(nfFreteGroup);
+        wrapper.appendChild(boletoGroup);
+
+        nfCheckbox.addEventListener('change', () => {
+          markUserEdit();
+          if (nfCheckbox.checked) {
+            nfInputs.innerHTML = '';
+            nfInputs.appendChild(buildNfInputRow('não veio', order, card, 0));
+            nfInputs.querySelectorAll('input').forEach((input) => {
+              input.value = 'não veio';
+              input.disabled = true;
+            });
+            addButton.disabled = true;
+            startPendingSave(`header:${order.oc}`);
+            persistNfFields(order, card);
+          } else {
+            nfInputs.querySelectorAll('input').forEach((input) => {
+              if (String(input.value).toLowerCase() === 'não veio') {
+                input.value = '';
+              }
+              input.disabled = false;
+            });
+            addButton.disabled = false;
+            startPendingSave(`header:${order.oc}`);
+            persistNfFields(order, card);
+          }
+        });
+
+        nfFreteCheckbox.addEventListener('change', () => {
+          markUserEdit();
+          if (nfFreteCheckbox.checked) {
+            nfFreteInput.value = 'não veio';
+            nfFreteInput.disabled = true;
+            setDraftValue(`nfFrete:${order.oc}`, nfFreteInput.value);
+            startPendingSave(`header:${order.oc}`);
+            persistNfFields(order, card);
+          } else {
+            if (String(nfFreteInput.value).toLowerCase() === 'não veio') {
+              nfFreteInput.value = '';
+            }
+            nfFreteInput.disabled = false;
+            setDraftValue(`nfFrete:${order.oc}`, nfFreteInput.value);
+            startPendingSave(`header:${order.oc}`);
+            persistNfFields(order, card);
+          }
+        });
+
+        return wrapper;
+      }
+
+      function buildNfInputRow(value, order, card, index) {
+        const row = document.createElement('div');
+        row.className = 'nf-row';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'nf-input';
+        input.placeholder = 'NF';
+        const nfKey = `nf:${order.oc}:${index}`;
+        input.value = getDraftValue(nfKey, value || '');
+        input.addEventListener('blur', () => {
+          startPendingSave(`header:${order.oc}`);
+          persistNfFields(order, card);
+        });
+        input.addEventListener('input', () => {
+          markUserEdit();
+          setDraftValue(nfKey, input.value);
+          persistNfFieldsDebounced(order, card);
+        });
+        input.addEventListener('focus', markUserEdit);
+        row.appendChild(input);
+        return row;
+      }
+
+      function splitNfValues(value) {
+        if (!value) {
+          return [''];
+        }
+        const parts = String(value)
+          .split(',')
+          .map((part) => part.trim())
+          .filter((part) => part !== '');
+        return parts.length ? parts : [''];
+      }
+
+      function persistNfFields(order, card) {
+        const nfInputs = card.querySelectorAll('.nf-input');
+        const nfValues = Array.from(nfInputs)
+          .map((input) => input.value.trim())
+          .filter((value) => value !== '');
+        const nfValue = nfValues.join(', ');
+        const nfFreteInput = card.querySelector('.nf-frete-input');
+        const nfFreteValue = nfFreteInput ? nfFreteInput.value.trim() : '';
+        const boletoSelect = card.querySelector('.js-boleto-select');
+        const boletoValue = boletoSelect ? boletoSelect.value : '';
+
+        google.script.run
+          .withSuccessHandler(() => {
+            patchOrderCache_(order.oc, { nf: nfValue, nfFrete: nfFreteValue, boleto: boletoValue });
+            clearDraftByPrefix(`nf:${order.oc}:`);
+            draftState.delete(`nfFrete:${order.oc}`);
+            draftState.delete(`boleto:${order.oc}`);
+            finishPendingSave(`header:${order.oc}`);
+          })
+          .withFailureHandler((error) => {
+            finishPendingSave(`header:${order.oc}`);
+            showError(error);
+          })
+          .updateOrderHeaderFields(order.oc, nfValue, nfFreteValue, boletoValue);
+      }
+
+      function persistOrderComment(order, commentValue, draftKey) {
+        google.script.run
+          .withSuccessHandler(() => {
+            patchOrderCache_(order.oc, { comment: commentValue });
+            if (draftKey) {
+              draftState.delete(draftKey);
+              finishPendingSave(draftKey);
+            }
+          })
+          .withFailureHandler((error) => {
+            if (draftKey) {
+              finishPendingSave(draftKey);
+            }
+            showError(error);
+          })
+          .updateOrderComment(order.oc, commentValue);
+      }
+
+      const persistNfFieldsDebounced = (() => {
+        const timers = new Map();
+        return (order, card) => {
+          const key = order.oc || '';
+          if (timers.has(key)) {
+            clearTimeout(timers.get(key));
+          }
+          startPendingSave(`header:${order.oc}`);
+          timers.set(key, setTimeout(() => persistNfFields(order, card), 500));
+        };
+      })();
+
+      function buildItemsTable(order, card) {
         const table = document.createElement('table');
         table.className = 'items-table';
         table.innerHTML = `
@@ -455,7 +1107,15 @@
         `;
 
         const body = document.createElement('tbody');
-        order.items.forEach((item) => {
+        const items = Array.isArray(order.items)
+          ? order.items.slice().sort((a, b) => Number(a.lineNo) - Number(b.lineNo))
+          : [];
+        if (!items.length) {
+          const row = document.createElement('tr');
+          row.innerHTML = '<td colspan="9" class="muted">Sem itens</td>';
+          body.appendChild(row);
+        }
+        items.forEach((item) => {
           const row = document.createElement('tr');
           row.innerHTML = `
             <td>${escapeHtml(item.code || '')}</td>
@@ -466,17 +1126,44 @@
             <td>${formatCurrency(item.total)}</td>
           `;
 
-          const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
-          const validityInput = buildInput('text', item.validity, 'Validade dd/MM/yyyy');
-          const labelInput = buildInput('number', item.labels, 'Etiquetas');
+          const qtyKey = `item:${order.oc}:${item.lineNo}:qtyReceived`;
+          const validityKey = `item:${order.oc}:${item.lineNo}:validity`;
+          const labelsKey = `item:${order.oc}:${item.lineNo}:labels`;
+          const qtyInput = buildInput('number', getDraftValue(qtyKey, item.qtyReceived), 'Quantidade recebida');
+          const validityInput = buildInput('text', getDraftValue(validityKey, normalizeDateInput(item.validity)), 'Validade dd/MM/yyyy');
+          const labelInput = buildInput('number', getDraftValue(labelsKey, item.labels), 'Etiquetas');
+          qtyInput.classList.add('js-qty-received');
+          validityInput.classList.add('js-validity');
+          labelInput.classList.add('js-labels');
 
-          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
-          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
-          labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
+          const saveKey = `item:${order.oc}:${item.lineNo}`;
+          qtyInput.addEventListener('blur', () => {
+            startPendingSave(saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+          });
+          validityInput.addEventListener('blur', () => {
+            startPendingSave(saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+          });
+          labelInput.addEventListener('blur', () => {
+            startPendingSave(saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+          });
 
-          qtyInput.addEventListener('input', () => updateOrderButtonState(order.oc));
-          validityInput.addEventListener('input', () => updateOrderButtonState(order.oc));
-          labelInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+          const handleItemInput = () => {
+            markUserEdit();
+            setDraftValue(qtyKey, qtyInput.value);
+            setDraftValue(validityKey, validityInput.value);
+            setDraftValue(labelsKey, labelInput.value);
+            saveItemDebounced(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+            updateOrderButtonStateForCard(card);
+          };
+          qtyInput.addEventListener('input', handleItemInput);
+          validityInput.addEventListener('input', handleItemInput);
+          labelInput.addEventListener('input', handleItemInput);
+          qtyInput.addEventListener('focus', markUserEdit);
+          validityInput.addEventListener('focus', markUserEdit);
+          labelInput.addEventListener('focus', markUserEdit);
 
           row.appendChild(wrapCell(qtyInput));
           row.appendChild(wrapCell(validityInput));
@@ -484,6 +1171,194 @@
 
           body.appendChild(row);
         });
+
+        const renderDraftRow = (draft) => {
+          const draftRow = document.createElement('tr');
+          draftRow.className = 'draft-row';
+          const codeCell = document.createElement('td');
+          const itemCell = document.createElement('td');
+          const unitCell = document.createElement('td');
+          const qtyCell = document.createElement('td');
+          const unitPriceCell = document.createElement('td');
+          const totalCell = document.createElement('td');
+          const qtyReceivedCell = document.createElement('td');
+          const validityCell = document.createElement('td');
+          const labelsCell = document.createElement('td');
+
+          const inputWrap = document.createElement('div');
+          inputWrap.style.position = 'relative';
+          const comboInput = document.createElement('input');
+          comboInput.type = 'text';
+          comboInput.placeholder = 'Buscar item...';
+          comboInput.value = draft.token ? draft.label : (draft.inputValue || '');
+          const optionsList = document.createElement('div');
+          optionsList.style.border = '1px solid #ccc';
+          optionsList.style.background = '#fff';
+          optionsList.style.maxHeight = '140px';
+          optionsList.style.overflowY = 'auto';
+          optionsList.style.marginTop = '4px';
+          optionsList.style.display = 'none';
+
+          const renderOptions = (query) => {
+            const normalizedQuery = normalizeText(query);
+            optionsList.innerHTML = '';
+            const matches = manualProductOptions.filter((option) => {
+              const label = normalizeText(option.label || '');
+              const name = normalizeText(option.name || '');
+              return !normalizedQuery || label.includes(normalizedQuery) || name.includes(normalizedQuery);
+            }).slice(0, 20);
+            matches.forEach((option) => {
+              const optionEl = document.createElement('div');
+              optionEl.textContent = option.label;
+              optionEl.style.padding = '4px 6px';
+              optionEl.style.cursor = 'pointer';
+              optionEl.addEventListener('click', () => selectOption(option));
+              optionsList.appendChild(optionEl);
+            });
+            optionsList.style.display = matches.length ? 'block' : 'none';
+          };
+
+          const selectOption = (option) => {
+            if (!option) {
+              return;
+            }
+            const updated = updateDraftRowState(order.oc, draft.draftId, {
+              token: option.token,
+              label: option.label,
+              code: option.code || '',
+              unit: option.unit || '',
+              name: option.name || '',
+              inputValue: option.label,
+            });
+            comboInput.value = updated.label;
+            codeCell.textContent = updated.code || '';
+            unitCell.textContent = updated.unit || '';
+            confirmButton.disabled = !updated.token;
+            optionsList.style.display = 'none';
+          };
+
+          comboInput.addEventListener('input', () => {
+            markUserEdit();
+            const currentDraft = getDraftRowsForOc(order.oc)
+              .find((entry) => entry.draftId === draft.draftId);
+            const normalizedInput = normalizeText(comboInput.value);
+            const shouldClearToken = currentDraft && currentDraft.token
+              && normalizeText(currentDraft.label || '') !== normalizedInput;
+            updateDraftRowState(order.oc, draft.draftId, {
+              inputValue: comboInput.value,
+              token: shouldClearToken ? '' : (currentDraft && currentDraft.token),
+              label: shouldClearToken ? '' : (currentDraft && currentDraft.label),
+              code: shouldClearToken ? '' : (currentDraft && currentDraft.code),
+              unit: shouldClearToken ? '' : (currentDraft && currentDraft.unit),
+              name: shouldClearToken ? '' : (currentDraft && currentDraft.name),
+            });
+            if (shouldClearToken) {
+              codeCell.textContent = '';
+              unitCell.textContent = '';
+            }
+            confirmButton.disabled = !getDraftRowsForOc(order.oc)
+              .find((entry) => entry.draftId === draft.draftId).token;
+            renderOptions(comboInput.value);
+          });
+          comboInput.addEventListener('focus', () => {
+            markUserEdit();
+            renderOptions(comboInput.value);
+          });
+          comboInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              const firstOption = manualProductOptions.find((option) => {
+                const label = normalizeText(option.label || '');
+                return label === normalizeText(comboInput.value);
+              });
+              if (firstOption) {
+                selectOption(firstOption);
+              }
+            }
+          });
+
+          const confirmButton = document.createElement('button');
+          confirmButton.type = 'button';
+          confirmButton.className = 'btn btn-primary';
+          confirmButton.textContent = '✅';
+          confirmButton.disabled = !draft.token;
+
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'btn btn-secondary';
+          removeButton.textContent = '🗑️';
+          removeButton.addEventListener('click', () => {
+            removeDraftRowState(order.oc, draft.draftId);
+            draftRow.remove();
+          });
+
+          confirmButton.addEventListener('click', () => {
+            const currentDraft = getDraftRowsForOc(order.oc)
+              .find((entry) => entry.draftId === draft.draftId);
+            if (!currentDraft || !currentDraft.token) {
+              return;
+            }
+            confirmButton.disabled = true;
+            comboInput.disabled = true;
+            removeButton.disabled = true;
+            confirmButton.textContent = 'Salvando...';
+            const saveKey = `manualAdd:${order.oc}:${draft.draftId}`;
+            startPendingSave(saveKey);
+            google.script.run
+              .withSuccessHandler(() => {
+                finishPendingSave(saveKey);
+                removeDraftRowState(order.oc, draft.draftId);
+                refreshOrders();
+              })
+              .withFailureHandler((error) => {
+                finishPendingSave(saveKey);
+                confirmButton.disabled = !currentDraft.token;
+                comboInput.disabled = false;
+                removeButton.disabled = false;
+                confirmButton.textContent = '✅';
+                showError(error);
+              })
+              .addManualItemToOc(order.oc, currentDraft.code, currentDraft.name, currentDraft.unit);
+          });
+
+          inputWrap.appendChild(comboInput);
+          inputWrap.appendChild(optionsList);
+          itemCell.appendChild(inputWrap);
+          labelsCell.appendChild(confirmButton);
+          labelsCell.appendChild(removeButton);
+
+          codeCell.textContent = draft.code || '';
+          unitCell.textContent = draft.unit || '';
+
+          draftRow.appendChild(codeCell);
+          draftRow.appendChild(itemCell);
+          draftRow.appendChild(unitCell);
+          draftRow.appendChild(qtyCell);
+          draftRow.appendChild(unitPriceCell);
+          draftRow.appendChild(totalCell);
+          draftRow.appendChild(qtyReceivedCell);
+          draftRow.appendChild(validityCell);
+          draftRow.appendChild(labelsCell);
+          body.appendChild(draftRow);
+        };
+
+        const drafts = getDraftRowsForOc(order.oc);
+        drafts.forEach((draft) => renderDraftRow(draft));
+
+        const controlRow = document.createElement('tr');
+        const controlCell = document.createElement('td');
+        controlCell.colSpan = 9;
+        const controlButton = document.createElement('button');
+        controlButton.type = 'button';
+        controlButton.className = 'btn btn-secondary';
+        controlButton.textContent = '+ Adicionar item';
+        controlButton.addEventListener('click', () => {
+          createDraftRowState(order.oc);
+          renderOrders(ordersCache);
+        });
+        controlCell.appendChild(controlButton);
+        controlRow.appendChild(controlCell);
+        body.appendChild(controlRow);
 
         table.appendChild(body);
         return table;
@@ -505,28 +1380,102 @@
         return td;
       }
 
-      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) {
-        const qtyValue = qtyInput.value === '' ? '' : Number(qtyInput.value);
+      function labelsInputIsInvalid_(rawValue, parsedValue) {
+        if (rawValue === '') {
+          return false;
+        }
+        if (Number.isNaN(parsedValue)) {
+          return true;
+        }
+        return !Number.isInteger(parsedValue);
+      }
+
+      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey) {
+        const qtyValue = qtyInput.value === '' ? '' : parseNumber(qtyInput.value);
         const validityValue = validityInput.value;
-        const labelsValue = labelInput.value === '' ? '' : Number(labelInput.value);
+        const labelsValue = labelInput.value === '' ? '' : parseNumber(labelInput.value);
+
+        if (qtyInput.value !== '' && Number.isNaN(qtyValue)) {
+          if (saveKey) {
+            finishPendingSave(saveKey);
+          }
+          showError({ message: 'Quantidade recebida inválida.' });
+          return;
+        }
+        if (labelsInputIsInvalid_(labelInput.value, labelsValue)) {
+          if (saveKey) {
+            finishPendingSave(saveKey);
+          }
+          showError({ message: 'Etiquetas inválidas.' });
+          return;
+        }
+        if (validityValue && !isValidDate(validityValue)) {
+          if (saveKey) {
+            finishPendingSave(saveKey);
+          }
+          showError({ message: 'Validade inválida.' });
+          return;
+        }
 
         google.script.run
-          .withFailureHandler(showError)
+          .withSuccessHandler(() => {
+            clearDraftByPrefix(`item:${oc}:${lineNo}:`);
+            if (saveKey) {
+              finishPendingSave(saveKey);
+            }
+            patchItemCache_(oc, lineNo, {
+              qtyReceived: qtyValue,
+              validity: validityValue,
+              labels: labelsValue,
+            });
+          })
+          .withFailureHandler((error) => {
+            if (saveKey) {
+              finishPendingSave(saveKey);
+            }
+            showError(error);
+          })
           .updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue, rowIndex);
       }
+
+      const saveItemDebounced = (() => {
+        const timers = new Map();
+        return (oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey) => {
+          const key = `${oc}-${lineNo}`;
+          if (timers.has(key)) {
+            clearTimeout(timers.get(key));
+          }
+          startPendingSave(saveKey);
+          timers.set(key, setTimeout(() => {
+            saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey);
+          }, 500));
+        };
+      })();
 
       function updateOrderButtonState(oc) {
         const card = document.querySelector(`.card[data-oc="${cssEscape(oc)}"]`);
         if (!card) {
           return;
         }
+        updateOrderButtonStateForCard(card);
+      }
+
+      function updateOrderButtonStateForCard(card) {
+        if (!card) {
+          return;
+        }
         const inputs = card.querySelectorAll('tbody tr');
         let complete = true;
         inputs.forEach((row) => {
-          const fields = row.querySelectorAll('input');
-          const qty = fields[0].value;
-          const validity = fields[1].value;
-          const labels = fields[2].value;
+          const qtyInput = row.querySelector('.js-qty-received');
+          const validityInput = row.querySelector('.js-validity');
+          const labelsInput = row.querySelector('.js-labels');
+          if (!qtyInput || !validityInput || !labelsInput) {
+            return;
+          }
+          const qty = qtyInput.value;
+          const validity = validityInput.value;
+          const labels = labelsInput.value;
           if (!isPositiveNumber(qty) || !isValidDate(validity) || !isPositiveInteger(labels)) {
             complete = false;
           }
@@ -554,34 +1503,19 @@
           message.textContent = 'Informe largura e altura válidas para as etiquetas.';
           return;
         }
-        const printWindow = window.open('about:blank', '_blank');
-        if (printWindow) {
-          printWindow.document.write('<p>Gerando PDF...</p>');
-        }
         button.disabled = true;
         button.textContent = 'Processando...';
 
         google.script.run
           .withSuccessHandler((response) => {
             button.dataset.locked = 'true';
-            removeOrderFromCache(order.oc);
-            removeOrderCard(order.oc);
-            const fileId = response && response.pdfFileId ? response.pdfFileId : '';
-            const printUrl = buildPrintUrl(fileId);
-            if (printWindow && printUrl) {
-              printWindow.location.href = printUrl;
-            } else if (response && response.pdfUrl) {
-              window.open(response.pdfUrl, '_blank', 'noopener');
-            }
-            openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
+            openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '');
+            refreshOrders(true);
           })
           .withFailureHandler((error) => {
             button.disabled = false;
             button.textContent = 'Recebido';
             message.textContent = error.message || 'Falha ao marcar como recebido.';
-            if (printWindow) {
-              printWindow.close();
-            }
           })
           .receiveOrder(order.oc, labelWidth, labelHeight);
       }
@@ -594,20 +1528,22 @@
 
         google.script.run
           .withSuccessHandler(() => {
-            alert('Pedido marcado para cancelamento.');
-            renderFilteredOrders();
+            alert('Pedido cancelado.');
+            removeOrderFromCache(order.oc);
+            removeOrderCard(order.oc);
           })
           .withFailureHandler(showError)
           .cancelOrderStub(order.oc);
       }
 
       function renderDetailsList(list) {
-        if (!list || !list.length) {
+        const safeList = asArray(list);
+        if (!safeList.length) {
           return '<span class="muted">Sem detalhes</span>';
         }
         return `
           <ul>
-            ${list.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+            ${safeList.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
           </ul>
         `;
       }
@@ -637,12 +1573,49 @@
         if (!value) {
           return false;
         }
-        const normalized = String(value).trim().replace(/[-.]/g, '/');
-        return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized);
+        if (value instanceof Date) {
+          return !Number.isNaN(value.getTime());
+        }
+        const normalized = String(value).trim();
+        if (!normalized) {
+          return false;
+        }
+        const normalizedSlash = normalized.replace(/[-.]/g, '/');
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(normalizedSlash)) {
+          return true;
+        }
+        const parsed = new Date(normalized);
+        return !Number.isNaN(parsed.getTime());
+      }
+
+      function normalizeDateInput(value) {
+        if (!value) {
+          return '';
+        }
+        if (value instanceof Date) {
+          return value.toLocaleDateString('pt-BR');
+        }
+        const text = String(value).trim();
+        if (!text) {
+          return '';
+        }
+        const normalized = text.replace(/[-.]/g, '/');
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(normalized)) {
+          return normalized;
+        }
+        const parsed = new Date(text);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed.toLocaleDateString('pt-BR');
+        }
+        return text;
       }
 
       function openLabelsModal(url) {
-        pdfLink.href = url || '#';
+        const normalizedUrl = url || '';
+        pdfLink.href = normalizedUrl || '#';
+        if (pdfMessage) {
+          pdfMessage.textContent = normalizedUrl ? '' : 'PDF não retornou URL (ver logs do servidor).';
+        }
         labelsModal.style.display = 'flex';
       }
 
@@ -722,14 +1695,114 @@
           .replace(/\s+/g, ' ');
       }
 
+      function asArray(value) {
+        if (Array.isArray(value)) {
+          return value;
+        }
+        if (value === null || value === undefined || value === '') {
+          return [];
+        }
+        return [String(value)];
+      }
+
+      function safeText(value) {
+        return String(value === null || value === undefined ? '' : value);
+      }
+
+      function normalizeOrder_(order) {
+        const normalized = {
+          oc: safeText(order && order.oc).trim(),
+          status: safeText(order && order.status),
+          sentAt: order && order.sentAt,
+          buyerSelected: safeText(order && order.buyerSelected),
+          supplierSelected: safeText(order && order.supplierSelected),
+          qtyTotal: order && order.qtyTotal !== undefined ? order.qtyTotal : 0,
+          valueTotal: order && order.valueTotal !== undefined ? order.valueTotal : 0,
+          nf: safeText(order && order.nf),
+          nfFrete: safeText(order && order.nfFrete),
+          groupOcs: safeText(order && order.groupOcs),
+          groupSentAts: safeText(order && order.groupSentAts),
+          comment: safeText(order && order.comment),
+          boleto: safeText(order && order.boleto),
+          buyerDetails: asArray(order && order.buyerDetails),
+          supplierDetails: asArray(order && order.supplierDetails),
+          items: Array.isArray(order && order.items) ? order.items : [],
+        };
+        normalized.items = normalized.items.map((item) => ({
+          lineNo: item && item.lineNo !== undefined ? item.lineNo : '',
+          code: safeText(item && item.code),
+          item: safeText(item && item.item),
+          unit: safeText(item && item.unit),
+          qty: item && item.qty !== undefined ? item.qty : 0,
+          unitPrice: item && item.unitPrice !== undefined ? item.unitPrice : 0,
+          total: item && item.total !== undefined ? item.total : 0,
+          qtyReceived: item && item.qtyReceived !== undefined ? item.qtyReceived : '',
+          validity: item && item.validity !== undefined ? item.validity : '',
+          labels: item && item.labels !== undefined ? item.labels : '',
+          rowIndex: item && item.rowIndex !== undefined ? item.rowIndex : null,
+        }));
+        return normalized;
+      }
+
+      function updateGroupButtonState() {
+        if (!groupSelectedButton) {
+          return;
+        }
+        groupSelectedButton.disabled = selectedGroupOcs.size < 2;
+      }
+
+      function handleGroupSelected() {
+        const ocList = Array.from(selectedGroupOcs);
+        if (ocList.length < 2) {
+          alert('Selecione ao menos dois pedidos.');
+          return;
+        }
+        const selectedOrders = ordersCache.filter((order) => ocList.includes(order.oc));
+        const supplier = normalizeText(selectedOrders[0] && selectedOrders[0].supplierSelected);
+        const mismatch = selectedOrders.find((order) => normalizeText(order.supplierSelected) !== supplier);
+        if (mismatch) {
+          alert('Só é possível agrupar pedidos com o mesmo fornecedor.');
+          return;
+        }
+        google.script.run
+          .withSuccessHandler((response) => {
+            alert(`Pedidos agrupados em ${response.ocPrimary}.`);
+            selectedGroupOcs.clear();
+            refreshOrders();
+          })
+          .withFailureHandler(showError)
+          .groupOrders(ocList);
+      }
+
       function matchesFilter(order, buyerValue, supplierValue) {
         const buyerMatch = buyerValue
-          ? normalizeText(order.buyerSelected) === normalizeText(buyerValue)
+          ? matchesAnyField_(buyerValue, order.buyerSelected, order.buyerDetails)
           : true;
         const supplierMatch = supplierValue
-          ? normalizeText(order.supplierSelected) === normalizeText(supplierValue)
+          ? matchesAnyField_(supplierValue, order.supplierSelected, order.supplierDetails)
           : true;
         return buyerMatch && supplierMatch;
+      }
+
+      function matchesNormalized_(orderValue, filterValue) {
+        const orderText = normalizeText(orderValue);
+        const filterText = normalizeText(filterValue);
+        if (!orderText || !filterText) {
+          return false;
+        }
+        return orderText === filterText
+          || orderText.includes(filterText)
+          || filterText.includes(orderText);
+      }
+
+      function matchesAnyField_(filterValue, primaryValue, detailsList) {
+        if (matchesNormalized_(primaryValue, filterValue)) {
+          return true;
+        }
+        if (!detailsList || !detailsList.length) {
+          return false;
+        }
+        return detailsList.some((entry) => matchesNormalized_(entry, filterValue));
       }
 
       window.addEventListener('load', init);
