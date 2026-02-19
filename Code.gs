@@ -260,11 +260,19 @@ function updateItemFields(oc, lineNo, qtyReceived, validity, labels, rowIndex) {
     throw new Error('Item não encontrado.');
   }
 
+  const normalizedValidity = normalizeBrDateInput_(validity);
+  if (normalizedValidity === '__INCOMPLETE__' || normalizedValidity === '__INVALID__') {
+    throw new Error('Validade inválida. Use dd/MM/aaaa.');
+  }
+  if (normalizedValidity && !isValidBrDateStrict_(normalizedValidity)) {
+    throw new Error('Validade inválida. Use uma data real no formato dd/MM/aaaa.');
+  }
+
   const indexMap = getItemIndexMap_(itemsRange);
   const startCol = itemsRange.getColumn();
   const sheet = itemsRange.getSheet();
   sheet.getRange(row, startCol + indexMap.qtyReceived, 1, 1).setValue(qtyReceived);
-  sheet.getRange(row, startCol + indexMap.validity, 1, 1).setValue(validity);
+  sheet.getRange(row, startCol + indexMap.validity, 1, 1).setValue(normalizedValidity || '');
   sheet.getRange(row, startCol + indexMap.labels, 1, 1).setValue(labels);
 
   return { ok: true };
@@ -971,15 +979,53 @@ function isPositiveInteger_(value) {
   return Number.isInteger(value) && value > 0;
 }
 
-function isValidDateString_(value) {
-  if (value instanceof Date) {
-    return true;
+function normalizeBrDateInput_(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
   }
-  if (typeof value !== 'string') {
+
+  const normalizedSeparators = raw.replace(/[-.]/g, '/');
+  const digits = normalizedSeparators.replace(/\D/g, '');
+  if (digits.length > 0 && digits.length < 8) {
+    return '__INCOMPLETE__';
+  }
+  if (digits.length === 8) {
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+  }
+
+  const fullMatch = normalizedSeparators.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (fullMatch) {
+    const dd = String(fullMatch[1]).padStart(2, '0');
+    const mm = String(fullMatch[2]).padStart(2, '0');
+    return `${dd}/${mm}/${fullMatch[3]}`;
+  }
+
+  if (/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/.test(normalizedSeparators)) {
+    return '__INCOMPLETE__';
+  }
+
+  return '__INVALID__';
+}
+
+function isValidBrDateStrict_(ddmmyyyy) {
+  const match = String(ddmmyyyy || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) {
     return false;
   }
-  const normalized = value.trim().replace(/[-.]/g, '/');
-  return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized);
+  const dd = Number(match[1]);
+  const mm = Number(match[2]);
+  const yyyy = Number(match[3]);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) {
+    return false;
+  }
+  const date = new Date(yyyy, mm - 1, dd);
+  return date.getFullYear() === yyyy && date.getMonth() === (mm - 1) && date.getDate() === dd;
+}
+
+function isValidDateString_(value) {
+  const normalized = normalizeBrDateInput_(value);
+  return !!normalized && normalized !== '__INCOMPLETE__' && normalized !== '__INVALID__' && isValidBrDateStrict_(normalized);
 }
 
 function isItemCompleteWithLabels_(item) {

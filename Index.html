@@ -604,7 +604,7 @@
             message.className = 'message';
 
             const receivedButton = document.createElement('button');
-            receivedButton.className = 'btn btn-primary';
+            receivedButton.className = 'btn btn-primary js-receive-btn';
             receivedButton.textContent = 'Recebido';
             receivedButton.disabled = normalizeText(normalized.status) === 'RECEBIDO' || !isOrderComplete(normalized);
             receivedButton.dataset.locked = normalizeText(normalized.status) === 'RECEBIDO' ? 'true' : 'false';
@@ -1069,15 +1069,15 @@
           const saveKey = `item:${order.oc}:${item.lineNo}`;
           qtyInput.addEventListener('blur', () => {
             startPendingSave(saveKey);
-            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey, 'blur');
           });
           validityInput.addEventListener('blur', () => {
             startPendingSave(saveKey);
-            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey, 'blur');
           });
           labelInput.addEventListener('blur', () => {
             startPendingSave(saveKey);
-            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey);
+            saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex, saveKey, 'blur');
           });
 
           const handleItemInput = () => {
@@ -1320,9 +1320,11 @@
         return !Number.isInteger(parsedValue);
       }
 
-      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey) {
+      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey, triggerSource) {
+        const source = triggerSource || 'input';
         const qtyValue = qtyInput.value === '' ? '' : parseNumber(qtyInput.value);
-        const validityValue = validityInput.value;
+        const validityRaw = validityInput.value;
+        const validityNorm = normalizeBrDateInput(validityRaw);
         const labelsValue = labelInput.value === '' ? '' : parseNumber(labelInput.value);
 
         if (qtyInput.value !== '' && Number.isNaN(qtyValue)) {
@@ -1339,11 +1341,37 @@
           showError({ message: 'Etiquetas inválidas.' });
           return;
         }
-        if (validityValue && !isValidDate(validityValue)) {
+        if (validityRaw && validityNorm === '__INCOMPLETE__') {
           if (saveKey) {
             finishPendingSave(saveKey);
           }
-          showError({ message: 'Validade inválida.' });
+          return;
+        }
+        if (validityRaw && validityNorm === '__INVALID__') {
+          if (saveKey) {
+            finishPendingSave(saveKey);
+          }
+          if (source === 'blur') {
+            showError({ message: 'Validade inválida. Use dd/MM/aaaa.' });
+          }
+          return;
+        }
+
+        const validityValue = (validityNorm && validityNorm !== '__INCOMPLETE__' && validityNorm !== '__INVALID__')
+          ? validityNorm
+          : '';
+
+        if (validityValue) {
+          validityInput.value = validityValue;
+        }
+
+        if (validityValue && !isValidBrDateStrict(validityValue)) {
+          if (saveKey) {
+            finishPendingSave(saveKey);
+          }
+          if (source === 'blur') {
+            showError({ message: 'Validade inválida. Use uma data real no formato dd/MM/aaaa.' });
+          }
           return;
         }
 
@@ -1377,7 +1405,7 @@
           }
           startPendingSave(saveKey);
           timers.set(key, setTimeout(() => {
-            saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey);
+            saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex, saveKey, 'input');
           }, 500));
         };
       })();
@@ -1406,11 +1434,11 @@
           const qty = qtyInput.value;
           const validity = validityInput.value;
           const labels = labelsInput.value;
-          if (!isPositiveNumber(qty) || !isValidDate(validity) || !isPositiveInteger(labels)) {
+          if (!isPositiveNumber(qty) || !isValidBrDateStrict(normalizeBrDateInput(validity) || '') || !isPositiveInteger(labels)) {
             complete = false;
           }
         });
-        const button = card.querySelector('.btn-primary');
+        const button = card.querySelector('.js-receive-btn');
         if (!button || button.dataset.locked === 'true') {
           return;
         }
@@ -1420,7 +1448,7 @@
       function isOrderComplete(order) {
         return order.items.every((item) => {
           return isPositiveNumber(item.qtyReceived)
-            && isValidDate(item.validity)
+            && isValidBrDateStrict(normalizeBrDateInput(item.validity) || '')
             && isPositiveInteger(item.labels);
         });
       }
@@ -1499,23 +1527,49 @@
         return Number.isInteger(numberValue) && numberValue > 0;
       }
 
-      function isValidDate(value) {
-        if (!value) {
+      function normalizeBrDateInput(value) {
+        const raw = String(value || '').trim();
+        if (!raw) {
+          return '';
+        }
+
+        const normalizedSeparators = raw.replace(/[-.]/g, '/');
+        const digits = normalizedSeparators.replace(/\D/g, '');
+        if (digits.length > 0 && digits.length < 8) {
+          return '__INCOMPLETE__';
+        }
+        if (digits.length === 8) {
+          return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+        }
+
+        const fullMatch = normalizedSeparators.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (fullMatch) {
+          const dd = String(fullMatch[1]).padStart(2, '0');
+          const mm = String(fullMatch[2]).padStart(2, '0');
+          return `${dd}/${mm}/${fullMatch[3]}`;
+        }
+
+        const shortYearMatch = normalizedSeparators.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+        if (shortYearMatch) {
+          return '__INCOMPLETE__';
+        }
+
+        return '__INVALID__';
+      }
+
+      function isValidBrDateStrict(ddmmyyyy) {
+        const match = String(ddmmyyyy || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (!match) {
           return false;
         }
-        if (value instanceof Date) {
-          return !Number.isNaN(value.getTime());
-        }
-        const normalized = String(value).trim();
-        if (!normalized) {
+        const dd = Number(match[1]);
+        const mm = Number(match[2]);
+        const yyyy = Number(match[3]);
+        if (mm < 1 || mm > 12 || dd < 1 || dd > 31) {
           return false;
         }
-        const normalizedSlash = normalized.replace(/[-.]/g, '/');
-        if (/^\d{2}\/\d{2}\/\d{4}$/.test(normalizedSlash)) {
-          return true;
-        }
-        const parsed = new Date(normalized);
-        return !Number.isNaN(parsed.getTime());
+        const date = new Date(yyyy, mm - 1, dd);
+        return date.getFullYear() === yyyy && date.getMonth() === (mm - 1) && date.getDate() === dd;
       }
 
       function normalizeDateInput(value) {
