@@ -266,25 +266,6 @@
       </div>
     </div>
     <div class="container">
-      <div class="card" id="registerCard">
-        <div class="card-title">Registrar pedido</div>
-        <div class="summary" style="margin-top:12px;">
-          <div><label>OC<br><input id="regOc" type="text"></label></div>
-          <div><label>Comprador<br><input id="regBuyer" type="text"></label></div>
-          <div><label>Fornecedor<br><input id="regSupplier" type="text"></label></div>
-          <div style="min-width:320px;"><label>Observação<br><input id="regComment" type="text"></label></div>
-        </div>
-        <div style="margin-top:12px;">
-          <label>Itens (JSON array)</label>
-          <textarea id="regItemsJson" rows="4" style="width:100%;">[{"lineNo":1,"code":"","item":"","unit":"","qty":1,"unitPrice":0,"total":0,"qtyReceived":"","validity":"","labels":""}]</textarea>
-        </div>
-        <div class="actions" style="justify-content:flex-start;">
-          <button id="registerOrderBtn" class="btn btn-primary" type="button">Registrar pedido</button>
-          <div id="registerMessage" class="message" style="margin-top:0;"></div>
-        </div>
-      </div>
-    </div>
-    <div class="container">
       <div id="debugPanel" class="empty-state" style="margin-bottom: 16px;">
         <strong>DEBUG</strong>
         <div>Carregados: <span id="debugLoaded">0</span></div>
@@ -328,13 +309,6 @@
       const debugMissingSupplier = document.getElementById('debugMissingSupplier');
       const debugBuyer = document.getElementById('debugBuyer');
       const debugSupplier = document.getElementById('debugSupplier');
-      const regOc = document.getElementById('regOc');
-      const regBuyer = document.getElementById('regBuyer');
-      const regSupplier = document.getElementById('regSupplier');
-      const regComment = document.getElementById('regComment');
-      const regItemsJson = document.getElementById('regItemsJson');
-      const registerOrderBtn = document.getElementById('registerOrderBtn');
-      const registerMessage = document.getElementById('registerMessage');
       let ordersCache = [];
       const selectedGroupOcs = new Set();
       const draftState = new Map();
@@ -360,9 +334,6 @@
         labelHeightInput.addEventListener('focus', markUserEdit);
         if (groupSelectedButton) {
           groupSelectedButton.addEventListener('click', handleGroupSelected);
-        }
-        if (registerOrderBtn) {
-          registerOrderBtn.addEventListener('click', handleRegisterOrder);
         }
         closeModal.addEventListener('click', closeLabelsModal);
         labelsModal.addEventListener('click', (event) => {
@@ -430,47 +401,6 @@
         option.textContent = label;
         return option;
       }
-
-      function handleRegisterOrder() {
-        if (!registerOrderBtn) {
-          return;
-        }
-        registerMessage.textContent = '';
-        let items = [];
-        try {
-          items = JSON.parse(regItemsJson.value || '[]');
-        } catch (error) {
-          registerMessage.textContent = 'JSON de itens inválido.';
-          return;
-        }
-
-        const payload = {
-          oc: regOc.value,
-          buyerSelected: regBuyer.value,
-          supplierSelected: regSupplier.value,
-          comment: regComment.value,
-          sentAt: new Date().toISOString(),
-          items,
-        };
-
-        registerOrderBtn.disabled = true;
-        google.script.run
-          .withSuccessHandler((response) => {
-            registerOrderBtn.disabled = false;
-            if (response && response.duplicate) {
-              registerMessage.textContent = 'Pedido já existente (duplicado).';
-            } else {
-              registerMessage.textContent = 'Pedido registrado com sucesso.';
-              refreshOrders();
-            }
-          })
-          .withFailureHandler((error) => {
-            registerOrderBtn.disabled = false;
-            registerMessage.textContent = error.message || 'Falha ao registrar pedido.';
-          })
-          .apiRegisterOrder(payload);
-      }
-
       function renderFilteredOrders() {
         const buyerValue = buyerFilter.value;
         const supplierValue = supplierFilter.value;

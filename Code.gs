@@ -6,7 +6,7 @@ const SHEET_NAMES = {
 const ORDER_COLUMN_LETTERS = {
   oc: 'A',
   status: 'G',
-  sentAt: 'H',
+  sentAt: 'P',
   buyerSelected: 'B',
   supplierSelected: 'D',
   qtyTotal: 'E',
@@ -18,7 +18,6 @@ const ORDER_COLUMN_LETTERS = {
   comment: 'M',
   groupOcs: 'N',
   groupSentAts: 'O',
-  receivedAt: 'P',
   boleto: 'R',
 };
 
@@ -64,7 +63,6 @@ const ORDER_HEADERS = [
   'groupOcs',
   'groupSentAts',
   'comment',
-  'receivedAt',
   'boleto',
 ];
 
@@ -186,70 +184,6 @@ function getBuyerOptions() {
 function getSupplierOptions() {
   const spreadsheet = getSpreadsheet_();
   return getNamedRangeOptions_(spreadsheet, 'EMP_FORN');
-}
-
-function apiRegisterOrder(payload) {
-  const validationError = validateRegisterPayload_(payload);
-  if (validationError) {
-    throw new Error(validationError);
-  }
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-
-  try {
-    const spreadsheet = getSpreadsheet_();
-    const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
-    const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
-    const oc = String(payload.oc || '').trim();
-
-    const existingRow = findOrderRowByOcInRange_(ordersRange, oc);
-    if (existingRow) {
-      return { ok: true, duplicate: true };
-    }
-
-    const normalized = normalizeBuyerSupplierFromPayload_(payload);
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    const qtyTotal = items.reduce((acc, item) => acc + Number(item.qty || 0), 0);
-    const valueTotal = items.reduce((acc, item) => acc + Number(item.total || 0), 0);
-    const sentAt = payload.sentAt ? new Date(payload.sentAt) : new Date();
-
-    const ordersValues = ordersRange.getValues();
-    const orderIndexMap = getOrderIndexMap_(ordersRange);
-    const insertIndex = findNextEmptyIndex_(ordersValues, orderIndexMap.oc);
-    if (insertIndex === -1 || insertIndex >= ordersValues.length) {
-      throw new Error('Sem espaço disponível no intervalo CONT_FIN para inserir pedidos.');
-    }
-
-    const ordersSheet = ordersRange.getSheet();
-    const orderRow = ordersRange.getRow() + insertIndex;
-
-    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.oc, oc);
-    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.buyerSelected, normalized.buyerSelected || '');
-    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.supplierSelected, normalized.supplierSelected || '');
-    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.qtyTotal, qtyTotal);
-    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.valueTotal, valueTotal);
-    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.status, 'PENDENTE_REGISTRO');
-
-    const nfCol = colLetterToAbsIndex_(ORDER_COLUMN_LETTERS.nf);
-    const nfFreteCol = colLetterToAbsIndex_(ORDER_COLUMN_LETTERS.nfFrete);
-    if (!ordersSheet.getRange(orderRow, nfCol).getValue()) {
-      ordersSheet.getRange(orderRow, nfCol).setValue('');
-    }
-    if (!ordersSheet.getRange(orderRow, nfFreteCol).getValue()) {
-      ordersSheet.getRange(orderRow, nfFreteCol).setValue('');
-    }
-
-    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.comment, String(payload.comment || ''));
-    setCellByLetter_(ordersSheet, orderRow, 'P', sentAt);
-
-    const itemRows = buildItemRowsFromPayload_(oc, items, normalized.buyerSelected, normalized.supplierSelected);
-    writePayloadItemsToRange_(itemsRange, itemRows);
-
-    return { ok: true, duplicate: false };
-  } finally {
-    lock.releaseLock();
-  }
 }
 
 function getManualProductOptions() {
@@ -436,11 +370,8 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     const pdfResult = generateLabelsPdf_(oc, order, items, width, height);
 
     const ordersSheet = ordersRange.getSheet();
-    const ordersStartCol = ordersRange.getColumn();
-    const orderIndexMap = getOrderIndexMap_(ordersRange);
     // Marca como recebido apenas a OC atual (não altera outros pedidos).
-    ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
-    ordersSheet.getRange(orderRow, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
+    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.status, 'RECEBIDO');
     ordersSheet.getRange(orderRow, 3).setValue(receivedAt); // Coluna C absoluta.
 
     return { ok: true, oc, pdfUrl: pdfResult.pdfUrl, pdfFileId: pdfResult.pdfFileId };
@@ -474,11 +405,8 @@ function markReceived(oc) {
   }
 
   const ordersSheet = ordersRange.getSheet();
-  const ordersStartCol = ordersRange.getColumn();
-  const orderIndexMap = getOrderIndexMap_(ordersRange);
   const receivedAt = new Date();
-  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.status).setValue('RECEBIDO');
-  ordersSheet.getRange(row, ordersStartCol + orderIndexMap.receivedAt).setValue(receivedAt);
+  setCellByLetter_(ordersSheet, row, ORDER_COLUMN_LETTERS.status, 'RECEBIDO');
   ordersSheet.getRange(row, 3).setValue(receivedAt); // Coluna C absoluta.
 
   return { ok: true };
@@ -766,118 +694,6 @@ function buildLabelsQueue_(order, items) {
   return queue;
 }
 
-function validateRegisterPayload_(payload) {
-  if (!payload || typeof payload !== 'object') {
-    return 'Payload inválido.';
-  }
-  if (!payload.oc) {
-    return 'OC é obrigatória.';
-  }
-  if (!payload.buyerSelected) {
-    return 'Comprador é obrigatório.';
-  }
-  if (!payload.supplierSelected) {
-    return 'Fornecedor é obrigatório.';
-  }
-  if (!Array.isArray(payload.items) || payload.items.length === 0) {
-    return 'Itens são obrigatórios.';
-  }
-
-  const invalidItem = payload.items.find((item) => {
-    return !isNumeric_(item.qty) || !isNumeric_(item.unitPrice) || !isNumeric_(item.total);
-  });
-  if (invalidItem) {
-    return 'Campos numéricos inválidos nos itens.';
-  }
-
-  return '';
-}
-
-function buildOrderRow_(payload, normalized) {
-  const totals = payload.totals || {};
-  const sentAt = payload.sentAt ? new Date(payload.sentAt) : new Date();
-
-  return {
-    oc: payload.oc,
-    status: 'PENDENTE',
-    sentAt,
-    buyerSelected: normalized.buyerSelected || '',
-    supplierSelected: normalized.supplierSelected || '',
-    qtyTotal: totals.qtyTotal || 0,
-    valueTotal: totals.valueTotal || 0,
-    nf: '',
-    nfFrete: '',
-    boleto: '',
-    buyerDetailsJson: JSON.stringify(normalized.buyerDetails || []),
-    supplierDetailsJson: JSON.stringify(normalized.supplierDetails || []),
-    groupOcs: '',
-    groupSentAts: '',
-    comment: '',
-    receivedAt: '',
-  };
-}
-
-function buildItemRows_(oc, items, buyerSelected, supplierSelected) {
-  return items.map((item, index) => ({
-    oc,
-    lineNo: index + 1,
-    code: item.code || '',
-    item: item.item || '',
-    unit: item.unit || '',
-    qty: item.qty || 0,
-    unitPrice: item.unitPrice || 0,
-    total: item.total || 0,
-    qtyReceived: '',
-    validity: '',
-    labels: '',
-    obsItem: '',
-    buyerSelected: buyerSelected || '',
-    supplierSelected: supplierSelected || '',
-    receivedAt: '',
-  }));
-}
-
-function buildItemRowsFromPayload_(oc, items, buyerSelected, supplierSelected) {
-  return (items || []).map((item, index) => ({
-    oc,
-    lineNo: item.lineNo || (index + 1),
-    code: item.code || '',
-    item: item.item || '',
-    unit: item.unit || '',
-    qty: item.qty || '',
-    unitPrice: item.unitPrice || '',
-    total: item.total || '',
-    qtyReceived: item.qtyReceived || '',
-    validity: item.validity || '',
-    labels: item.labels || '',
-    obsItem: item.obsItem || '',
-    buyerSelected: buyerSelected || '',
-    supplierSelected: supplierSelected || '',
-    receivedAt: '',
-  }));
-}
-
-function writePayloadItemsToRange_(range, itemRows) {
-  if (!itemRows.length) {
-    return;
-  }
-  const values = range.getValues();
-  const indexMap = getItemIndexMap_(range);
-  const sheet = range.getSheet();
-  const startCol = range.getColumn();
-
-  let insertIndex = findNextEmptyIndex_(values, indexMap.oc);
-  if (insertIndex === -1 || (insertIndex + itemRows.length) > values.length) {
-    throw new Error('Sem espaço disponível em REC_POR_ITEM.');
-  }
-
-  itemRows.forEach((itemRow, offset) => {
-    const rowNumber = range.getRow() + insertIndex + offset;
-    const rowValues = mapItemRowToRange_(itemRow, values[0].length, indexMap);
-    sheet.getRange(rowNumber, startCol, 1, rowValues.length).setValues([rowValues]);
-  });
-}
-
 function findOrderRowByOcInRange_(range, oc) {
   const values = range.getValues();
   const indexMap = getOrderIndexMap_(range);
@@ -926,7 +742,6 @@ function readOrdersFromRange_(range) {
       groupOcs: row[indexMap.groupOcs] || '',
       groupSentAts: row[indexMap.groupSentAts] || '',
       comment: row[indexMap.comment] || '',
-      receivedAt: formatDateValue_(row[indexMap.receivedAt]),
     }));
 }
 
@@ -968,40 +783,6 @@ function readItemsByOcFromRange_(range) {
     });
     return acc;
   }, {});
-}
-
-function writeOrderRowsToRange_(range, orderRows) {
-  if (!orderRows.length) {
-    return;
-  }
-  const values = range.getValues();
-  const indexMap = getOrderIndexMap_(range);
-  const insertIndex = findNextEmptyIndex_(values, indexMap.oc);
-  if (insertIndex === -1 || insertIndex + orderRows.length > values.length) {
-    throw new Error('Sem espaço disponível no intervalo CONT_FIN para inserir pedidos.');
-  }
-  const output = orderRows.map((row) => mapOrderRowToRange_(row, values[0].length, indexMap));
-  const sheet = range.getSheet();
-  const startRow = range.getRow() + insertIndex;
-  const startCol = range.getColumn();
-  sheet.getRange(startRow, startCol, output.length, output[0].length).setValues(output);
-}
-
-function writeItemRowsToRange_(range, itemRows) {
-  if (!itemRows.length) {
-    return;
-  }
-  const values = range.getValues();
-  const indexMap = getItemIndexMap_(range);
-  const insertIndex = findNextEmptyIndex_(values, indexMap.oc);
-  if (insertIndex === -1 || insertIndex + itemRows.length > values.length) {
-    throw new Error('Sem espaço disponível no intervalo REC_POR_ITEM para inserir itens.');
-  }
-  const output = itemRows.map((row) => mapItemRowToRange_(row, values[0].length, indexMap));
-  const sheet = range.getSheet();
-  const startRow = range.getRow() + insertIndex;
-  const startCol = range.getColumn();
-  sheet.getRange(startRow, startCol, output.length, output[0].length).setValues(output);
 }
 
 function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
@@ -1054,7 +835,6 @@ function mapOrderRowToRange_(row, totalCols, indexMap) {
   output[indexMap.groupOcs] = row.groupOcs;
   output[indexMap.groupSentAts] = row.groupSentAts;
   output[indexMap.comment] = row.comment || '';
-  output[indexMap.receivedAt] = row.receivedAt;
   return output;
 }
 
@@ -1432,32 +1212,6 @@ function formatDateOnly_(value) {
   return String(value);
 }
 
-
-function normalizeBuyerSupplierFromPayload_(payload) {
-  const buyerSelected =
-    (payload && payload.buyer && payload.buyer.selected)
-    || (payload && payload.buyerSelected)
-    || '';
-  const supplierSelected =
-    (payload && payload.supplier && payload.supplier.selected)
-    || (payload && payload.supplierSelected)
-    || '';
-  const buyerDetails =
-    (payload && payload.buyer && payload.buyer.details)
-    || (payload && payload.buyerDetails)
-    || [];
-  const supplierDetails =
-    (payload && payload.supplier && payload.supplier.details)
-    || (payload && payload.supplierDetails)
-    || [];
-
-  return {
-    buyerSelected: String(buyerSelected || '').trim(),
-    supplierSelected: String(supplierSelected || '').trim(),
-    buyerDetails: Array.isArray(buyerDetails) ? buyerDetails : [],
-    supplierDetails: Array.isArray(supplierDetails) ? supplierDetails : [],
-  };
-}
 
 function normalizeBuyerSupplierFromPayload_(payload) {
   const buyerSelected =
