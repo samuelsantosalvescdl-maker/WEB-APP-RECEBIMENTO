@@ -1458,3 +1458,29 @@ function normalizeBuyerSupplierFromPayload_(payload) {
     supplierDetails: Array.isArray(supplierDetails) ? supplierDetails : [],
   };
 }
+
+function normalizeBuyerSupplierFromPayload_(payload) {
+  const buyerSelected =
+    (payload && payload.buyer && payload.buyer.selected)
+    || (payload && payload.buyerSelected)
+    || '';
+  const supplierSelected =
+    (payload && payload.supplier && payload.supplier.selected)
+    || (payload && payload.supplierSelected)
+    || '';
+  const buyerDetails =
+    (payload && payload.buyer && payload.buyer.details)
+    || (payload && payload.buyerDetails)
+    || [];
+  const supplierDetails =
+    (payload && payload.supplier && payload.supplier.details)
+    || (payload && payload.supplierDetails)
+    || [];
+
+  return {
+    buyerSelected: String(buyerSelected || '').trim(),
+    supplierSelected: String(supplierSelected || '').trim(),
+    buyerDetails: Array.isArray(buyerDetails) ? buyerDetails : [],
+    supplierDetails: Array.isArray(supplierDetails) ? supplierDetails : [],
+  };
+}
