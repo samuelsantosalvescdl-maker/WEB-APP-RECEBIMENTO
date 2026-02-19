@@ -1,5 +1,3 @@
-const API_KEY = '741852963';
-
 const SHEET_NAMES = {
   ORDERS: 'CONT_FIN',
   ITEMS: 'REC_POR_ITEM',
@@ -49,8 +47,6 @@ const LEGACY_ITEM_BUYER_SUPPLIER_COLUMNS = {
 
 const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
 const LABELS_FOLDER_ID = '1UzyIn1fsiVIatfgQQK-GyGIeJI4Z-AFs';
-const WEBAPP_C_URL = 'https://script.google.com/macros/s/AKfycbyohvLNZUxc1Kdyg0N5dr4lxgA9pXMbzEUwy2dLWF_P5IHfeEpyPnkjnKGAvOQfk1Y3/exec';
-const WEBAPP_C_API_KEY = '369258147';
 const LAST_LABELS_PDF_PROPERTY = 'LAST_LABELS_PDF_FILE_ID';
 
 const ORDER_HEADERS = [
@@ -99,79 +95,17 @@ function doGet(e) {
   if (view === 'pdf') {
     const fileId = e && e.parameter && e.parameter.fileId;
     if (!fileId) {
-      return ContentService.createTextOutput('Arquivo não informado.');
+      return HtmlService.createHtmlOutput('Arquivo não informado.');
     }
     try {
       const file = DriveApp.getFileById(fileId);
       return file.getBlob().setContentType('application/pdf');
     } catch (error) {
-      return ContentService.createTextOutput('PDF não encontrado.');
+      return HtmlService.createHtmlOutput('PDF não encontrado.');
     }
   }
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Recebimento de Pedidos');
-}
-
-function doPost(e) {
-  try {
-    const parameterKey = (e && e.parameter && e.parameter.apiKey) || '';
-
-    if (!e || !e.postData || !e.postData.contents) {
-      return jsonResponse_({ ok: false, error: 'Payload vazio.' });
-    }
-
-    let payload;
-    try {
-      payload = JSON.parse(e.postData.contents);
-    } catch (parseError) {
-      return jsonResponse_({ ok: false, error: 'Payload JSON inválido.' });
-    }
-
-    const apiKey = parameterKey || (payload && payload.apiKey);
-    const apiKeyNormalized = String(apiKey || '').trim();
-    const expectedKey = String(API_KEY || '').trim();
-
-    if (!apiKeyNormalized || apiKeyNormalized !== expectedKey) {
-      return jsonResponse_({ ok: false, error: 'API key inválida.' });
-    }
-
-    const validationError = validatePayload_(payload);
-    if (validationError) {
-      Logger.log(`Validação falhou: ${validationError}`);
-      return jsonResponse_({ ok: false, error: validationError });
-    }
-
-    const lock = LockService.getScriptLock();
-    lock.waitLock(10000);
-
-    try {
-      const normalized = normalizeBuyerSupplierFromPayload_(payload);
-      const spreadsheet = getSpreadsheet_();
-      const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
-      const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
-
-      const existingRow = findOrderRowByOcInRange_(ordersRange, payload.oc);
-      if (existingRow) {
-        Logger.log(`Pedido duplicado ignorado: ${payload.oc}`);
-        return jsonResponse_({ ok: true, duplicate: true });
-      }
-
-      Logger.log(`Recebendo pedido: oc=${payload.oc} itens=${payload.items.length} comprador=${normalized.buyerSelected} fornecedor=${normalized.supplierSelected}`);
-      const orderRow = buildOrderRow_(payload, normalized);
-      writeOrderRowsToRange_(ordersRange, [orderRow]);
-
-      const itemRows = buildItemRows_(payload.oc, payload.items, normalized.buyerSelected, normalized.supplierSelected);
-      if (itemRows.length) {
-        writeItemRowsToRange_(itemsRange, itemRows);
-      }
-
-      return jsonResponse_({ ok: true });
-    } finally {
-      lock.releaseLock();
-    }
-  } catch (error) {
-    return jsonResponse_({ ok: false, error: error.message || 'Erro inesperado.' });
-  }
 }
 
 function getOrdersWithItems() {
@@ -252,6 +186,70 @@ function getBuyerOptions() {
 function getSupplierOptions() {
   const spreadsheet = getSpreadsheet_();
   return getNamedRangeOptions_(spreadsheet, 'EMP_FORN');
+}
+
+function apiRegisterOrder(payload) {
+  const validationError = validateRegisterPayload_(payload);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  try {
+    const spreadsheet = getSpreadsheet_();
+    const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+    const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
+    const oc = String(payload.oc || '').trim();
+
+    const existingRow = findOrderRowByOcInRange_(ordersRange, oc);
+    if (existingRow) {
+      return { ok: true, duplicate: true };
+    }
+
+    const normalized = normalizeBuyerSupplierFromPayload_(payload);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const qtyTotal = items.reduce((acc, item) => acc + Number(item.qty || 0), 0);
+    const valueTotal = items.reduce((acc, item) => acc + Number(item.total || 0), 0);
+    const sentAt = payload.sentAt ? new Date(payload.sentAt) : new Date();
+
+    const ordersValues = ordersRange.getValues();
+    const orderIndexMap = getOrderIndexMap_(ordersRange);
+    const insertIndex = findNextEmptyIndex_(ordersValues, orderIndexMap.oc);
+    if (insertIndex === -1 || insertIndex >= ordersValues.length) {
+      throw new Error('Sem espaço disponível no intervalo CONT_FIN para inserir pedidos.');
+    }
+
+    const ordersSheet = ordersRange.getSheet();
+    const orderRow = ordersRange.getRow() + insertIndex;
+
+    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.oc, oc);
+    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.buyerSelected, normalized.buyerSelected || '');
+    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.supplierSelected, normalized.supplierSelected || '');
+    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.qtyTotal, qtyTotal);
+    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.valueTotal, valueTotal);
+    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.status, 'PENDENTE_REGISTRO');
+
+    const nfCol = colLetterToAbsIndex_(ORDER_COLUMN_LETTERS.nf);
+    const nfFreteCol = colLetterToAbsIndex_(ORDER_COLUMN_LETTERS.nfFrete);
+    if (!ordersSheet.getRange(orderRow, nfCol).getValue()) {
+      ordersSheet.getRange(orderRow, nfCol).setValue('');
+    }
+    if (!ordersSheet.getRange(orderRow, nfFreteCol).getValue()) {
+      ordersSheet.getRange(orderRow, nfFreteCol).setValue('');
+    }
+
+    setCellByLetter_(ordersSheet, orderRow, ORDER_COLUMN_LETTERS.comment, String(payload.comment || ''));
+    setCellByLetter_(ordersSheet, orderRow, 'P', sentAt);
+
+    const itemRows = buildItemRowsFromPayload_(oc, items, normalized.buyerSelected, normalized.supplierSelected);
+    writePayloadItemsToRange_(itemsRange, itemRows);
+
+    return { ok: true, duplicate: false };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function getManualProductOptions() {
@@ -437,8 +435,6 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     deleteLastPdf_();
     const pdfResult = generateLabelsPdf_(oc, order, items, width, height);
 
-    sendToWebAppC_(order, items, pdfResult);
-
     const ordersSheet = ordersRange.getSheet();
     const ordersStartCol = ordersRange.getColumn();
     const orderIndexMap = getOrderIndexMap_(ordersRange);
@@ -575,6 +571,11 @@ function colLetterToAbsIndex_(letter) {
     result = (result * 26) + (code - 64);
   }
   return result;
+}
+
+function setCellByLetter_(sheet, row, colLetter, value) {
+  const col = colLetterToAbsIndex_(colLetter);
+  sheet.getRange(row, col).setValue(value);
 }
 
 function absToRelIndex0_(absCol, range) {
@@ -721,245 +722,6 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
   `;
 }
 
-function sendToWebAppC_(order, items, pdfResult) {
-  const payload = {
-    apiVersion: 1,
-    apiKey: WEBAPP_C_API_KEY,
-    oc: order.oc,
-    sentAt: new Date().toISOString(),
-    buyerSelected: order.buyerSelected || '',
-    supplierSelected: order.supplierSelected || '',
-    items: items.map((item) => ({
-      lineNo: item.lineNo,
-      code: item.code || '',
-      item: item.item || '',
-      unit: item.unit || '',
-      qty: item.qty || 0,
-      unitPrice: item.unitPrice || 0,
-      total: item.total || 0,
-      qtyReceived: Number(item.qtyReceived) || 0,
-      validity: item.validity || '',
-      labels: Number(item.labels) || 0,
-    })),
-    pdfFileId: pdfResult.pdfFileId,
-    pdfUrl: pdfResult.pdfUrl,
-  };
-
-  const url = WEBAPP_C_URL
-    + (WEBAPP_C_URL.includes('?') ? '&' : '?')
-    + 'apiKey=' + encodeURIComponent(WEBAPP_C_API_KEY);
-
-  const response = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true,
-  });
-
-  const status = response.getResponseCode();
-  const text = response.getContentText();
-  let parsed = null;
-
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    parsed = null;
-  }
-
-  if (parsed && (parsed.ok === true || parsed.duplicate === true)) {
-    return { ok: true, duplicate: parsed.duplicate === true };
-  }
-
-  if (parsed && parsed.ok === false) {
-    throw new Error(buildWebAppCError_(status, parsed.error, text));
-  }
-
-  if (status >= 400) {
-    if (parsed && parsed.error) {
-      throw new Error(buildWebAppCError_(status, parsed.error, text));
-    }
-    throw new Error(buildWebAppCError_(status, null, text));
-  }
-
-  if (!parsed) {
-    throw new Error(buildWebAppCError_(status, null, text));
-  }
-  const info = {
-    scriptId: parsed.scriptId || '',
-    expectedKeyLast3: parsed.expectedKeyLast3 || '',
-  };
-  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
-  return info;
-}
-
-function buildWebAppCError_(status, message, bodyText) {
-  const snippet = String(bodyText || '').slice(0, 200);
-  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
-  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
-}
-
-function readManualProductRange_(spreadsheet, rangeName, labelPrefix) {
-  const range = getNamedRange_(spreadsheet, rangeName);
-  const values = range.getValues();
-  const startRow = range.getRow();
-  return values.map((row, index) => {
-    const code = row[0];
-    const name = row[1];
-    const unit = row[2];
-    if (!name) {
-      return null;
-    }
-    return {
-      token: `${labelPrefix}||${startRow + index}`,
-      label: `${labelPrefix} - ${name}`,
-      code,
-      name,
-      unit,
-    };
-  }).filter((entry) => entry);
-}
-
-function testWebAppCConnection_() {
-  const url = WEBAPP_C_URL
-    + (WEBAPP_C_URL.includes('?') ? '&' : '?')
-    + 'ping=1';
-  const response = UrlFetchApp.fetch(url, {
-    method: 'get',
-    muteHttpExceptions: true,
-  });
-  const status = response.getResponseCode();
-  const text = response.getContentText();
-  let parsed = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    parsed = null;
-  }
-  if (!parsed || parsed.ok !== true) {
-    throw new Error(buildWebAppCError_(status, parsed && parsed.error, text));
-  }
-  const info = {
-    scriptId: parsed.scriptId || '',
-    expectedKeyLast3: parsed.expectedKeyLast3 || '',
-  };
-  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
-  return info;
-}
-
-function buildWebAppCError_(status, message, bodyText) {
-  const snippet = String(bodyText || '').slice(0, 200);
-  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
-  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
-}
-
-function readManualProductRange_(spreadsheet, rangeName, labelPrefix) {
-  const range = getNamedRange_(spreadsheet, rangeName);
-  const values = range.getValues();
-  const startRow = range.getRow();
-  return values.map((row, index) => {
-    const code = row[0];
-    const name = row[1];
-    const unit = row[2];
-    if (!name) {
-      return null;
-    }
-    return {
-      token: `${labelPrefix}||${startRow + index}`,
-      label: `${labelPrefix} - ${name}`,
-      code,
-      name,
-      unit,
-    };
-  }).filter((entry) => entry);
-}
-
-function testWebAppCConnection_() {
-  const url = WEBAPP_C_URL
-    + (WEBAPP_C_URL.includes('?') ? '&' : '?')
-    + 'ping=1';
-  const response = UrlFetchApp.fetch(url, {
-    method: 'get',
-    muteHttpExceptions: true,
-  });
-  const status = response.getResponseCode();
-  const text = response.getContentText();
-  let parsed = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    parsed = null;
-  }
-  if (!parsed || parsed.ok !== true) {
-    throw new Error(buildWebAppCError_(status, parsed && parsed.error, text));
-  }
-  const info = {
-    scriptId: parsed.scriptId || '',
-    expectedKeyLast3: parsed.expectedKeyLast3 || '',
-  };
-  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
-  return info;
-}
-
-function buildWebAppCError_(status, message, bodyText) {
-  const snippet = String(bodyText || '').slice(0, 200);
-  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
-  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
-}
-
-function readManualProductRange_(spreadsheet, rangeName, labelPrefix) {
-  const range = getNamedRange_(spreadsheet, rangeName);
-  const values = range.getValues();
-  const startRow = range.getRow();
-  return values.map((row, index) => {
-    const code = row[0];
-    const name = row[1];
-    const unit = row[2];
-    if (!name) {
-      return null;
-    }
-    return {
-      token: `${labelPrefix}||${startRow + index}`,
-      label: `${labelPrefix} - ${name}`,
-      code,
-      name,
-      unit,
-    };
-  }).filter((entry) => entry);
-}
-
-function testWebAppCConnection_() {
-  const url = WEBAPP_C_URL
-    + (WEBAPP_C_URL.includes('?') ? '&' : '?')
-    + 'ping=1';
-  const response = UrlFetchApp.fetch(url, {
-    method: 'get',
-    muteHttpExceptions: true,
-  });
-  const status = response.getResponseCode();
-  const text = response.getContentText();
-  let parsed = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    parsed = null;
-  }
-  if (!parsed || parsed.ok !== true) {
-    throw new Error(buildWebAppCError_(status, parsed && parsed.error, text));
-  }
-  const info = {
-    scriptId: parsed.scriptId || '',
-    expectedKeyLast3: parsed.expectedKeyLast3 || '',
-  };
-  Logger.log(`WebApp C OK: scriptId=${info.scriptId} keyLast3=${info.expectedKeyLast3}`);
-  return info;
-}
-
-function buildWebAppCError_(status, message, bodyText) {
-  const snippet = String(bodyText || '').slice(0, 200);
-  const safeMessage = message ? String(message) : 'Erro ao enviar para o WebApp C.';
-  return `WebApp C: ${safeMessage} | HTTP ${status} | respSnippet: ${snippet}`;
-}
-
 function readManualProductRange_(spreadsheet, rangeName, labelPrefix) {
   const range = getNamedRange_(spreadsheet, rangeName);
   const values = range.getValues();
@@ -1004,12 +766,18 @@ function buildLabelsQueue_(order, items) {
   return queue;
 }
 
-function validatePayload_(payload) {
+function validateRegisterPayload_(payload) {
   if (!payload || typeof payload !== 'object') {
     return 'Payload inválido.';
   }
   if (!payload.oc) {
     return 'OC é obrigatória.';
+  }
+  if (!payload.buyerSelected) {
+    return 'Comprador é obrigatório.';
+  }
+  if (!payload.supplierSelected) {
+    return 'Fornecedor é obrigatório.';
   }
   if (!Array.isArray(payload.items) || payload.items.length === 0) {
     return 'Itens são obrigatórios.';
@@ -1067,6 +835,47 @@ function buildItemRows_(oc, items, buyerSelected, supplierSelected) {
     supplierSelected: supplierSelected || '',
     receivedAt: '',
   }));
+}
+
+function buildItemRowsFromPayload_(oc, items, buyerSelected, supplierSelected) {
+  return (items || []).map((item, index) => ({
+    oc,
+    lineNo: item.lineNo || (index + 1),
+    code: item.code || '',
+    item: item.item || '',
+    unit: item.unit || '',
+    qty: item.qty || '',
+    unitPrice: item.unitPrice || '',
+    total: item.total || '',
+    qtyReceived: item.qtyReceived || '',
+    validity: item.validity || '',
+    labels: item.labels || '',
+    obsItem: item.obsItem || '',
+    buyerSelected: buyerSelected || '',
+    supplierSelected: supplierSelected || '',
+    receivedAt: '',
+  }));
+}
+
+function writePayloadItemsToRange_(range, itemRows) {
+  if (!itemRows.length) {
+    return;
+  }
+  const values = range.getValues();
+  const indexMap = getItemIndexMap_(range);
+  const sheet = range.getSheet();
+  const startCol = range.getColumn();
+
+  let insertIndex = findNextEmptyIndex_(values, indexMap.oc);
+  if (insertIndex === -1 || (insertIndex + itemRows.length) > values.length) {
+    throw new Error('Sem espaço disponível em REC_POR_ITEM.');
+  }
+
+  itemRows.forEach((itemRow, offset) => {
+    const rowNumber = range.getRow() + insertIndex + offset;
+    const rowValues = mapItemRowToRange_(itemRow, values[0].length, indexMap);
+    sheet.getRange(rowNumber, startCol, 1, rowValues.length).setValues([rowValues]);
+  });
 }
 
 function findOrderRowByOcInRange_(range, oc) {
@@ -1623,10 +1432,31 @@ function formatDateOnly_(value) {
   return String(value);
 }
 
-function jsonResponse_(payload) {
-  return ContentService
-    .createTextOutput(JSON.stringify(payload))
-    .setMimeType(ContentService.MimeType.JSON);
+
+function normalizeBuyerSupplierFromPayload_(payload) {
+  const buyerSelected =
+    (payload && payload.buyer && payload.buyer.selected)
+    || (payload && payload.buyerSelected)
+    || '';
+  const supplierSelected =
+    (payload && payload.supplier && payload.supplier.selected)
+    || (payload && payload.supplierSelected)
+    || '';
+  const buyerDetails =
+    (payload && payload.buyer && payload.buyer.details)
+    || (payload && payload.buyerDetails)
+    || [];
+  const supplierDetails =
+    (payload && payload.supplier && payload.supplier.details)
+    || (payload && payload.supplierDetails)
+    || [];
+
+  return {
+    buyerSelected: String(buyerSelected || '').trim(),
+    supplierSelected: String(supplierSelected || '').trim(),
+    buyerDetails: Array.isArray(buyerDetails) ? buyerDetails : [],
+    supplierDetails: Array.isArray(supplierDetails) ? supplierDetails : [],
+  };
 }
 
 function normalizeBuyerSupplierFromPayload_(payload) {
