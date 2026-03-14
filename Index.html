@@ -251,7 +251,6 @@
       const labelHeightInput = document.getElementById('labelHeightCm');
       const labelsModal = document.getElementById('labelsModal');
       const pdfLink = document.getElementById('pdfLink');
-      const printPdf = document.getElementById('printPdf');
       const closeModal = document.getElementById('closeModal');
       let ordersCache = [];
 
@@ -273,14 +272,6 @@
             closeLabelsModal();
           }
         });
-        if (printPdf) {
-          printPdf.addEventListener('click', () => {
-            if (!pdfLink.href || pdfLink.href === '#') {
-              return;
-            }
-            window.open(pdfLink.href, '_blank', 'noopener');
-          });
-        }
       }
 
       function loadFilterOptions() {
