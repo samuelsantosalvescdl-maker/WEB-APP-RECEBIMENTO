@@ -99,7 +99,7 @@ function getBuyerOptions() {
 }
 
 function getSupplierOptions() {
-  return getNamedRangeColumnValues_(getSpreadsheet_(), 'EMP_FORN', 'B');
+  return getNamedRangeColumnValues_(getSpreadsheet_(), 'EMP_FORN', 'A');
 }
 
 function updateOrderHeaderFields(oc, nfValue, nfFreteValue, boletoValue) {
