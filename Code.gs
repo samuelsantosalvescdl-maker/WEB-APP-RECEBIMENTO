@@ -527,8 +527,7 @@ function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
   const startCol = range.getColumn();
   const startRow = range.getRow();
   const values = range.getValues();
-  const receivedText = formatDateTime_(receivedAt);
-
+  // Mantemos Date real para melhor compatibilidade com filtros e ordenações de planilha.
   values.forEach((row, index) => {
     if (String(row[ITEM_RANGE_MAP.oc]) !== String(order.oc)) {
       return;
@@ -536,7 +535,7 @@ function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
     const rowNumber = startRow + index;
     sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.buyerSelected).setValue(order.buyerSelected || '');
     sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.supplierSelected).setValue(order.supplierSelected || '');
-    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.receivedAt).setValue(receivedText);
+    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.receivedAt).setValue(receivedAt);
   });
 }
 
