@@ -587,4 +587,3 @@ function formatDateOnly_(value) {
   }
   return String(value);
 }
-
