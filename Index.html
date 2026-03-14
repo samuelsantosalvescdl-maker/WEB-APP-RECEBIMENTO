@@ -4,202 +4,46 @@
     <base target="_top">
     <meta charset="UTF-8">
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        background: #f7f7f7;
-        margin: 0;
-        padding: 0;
-      }
-      .container {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 24px;
-      }
-      .filter-bar {
-        position: sticky;
-        top: 0;
-        z-index: 10;
-        background: #ffffff;
-        border-bottom: 1px solid #e2e8f0;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-      }
-      .filter-content {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 12px 24px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        align-items: center;
-      }
-      .filter-content label {
-        font-size: 12px;
-        font-weight: 600;
-        color: #2d3748;
-      }
-      .filter-content select {
-        min-width: 220px;
-        padding: 6px 8px;
-        border-radius: 4px;
-        border: 1px solid #cbd5e0;
-        background: #fff;
-      }
-      .filter-content input[type="text"] {
-        width: 140px;
-        padding: 6px 8px;
-        border-radius: 4px;
-        border: 1px solid #cbd5e0;
-      }
-      .filter-group {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .empty-state {
-        background: #fff;
-        border: 1px dashed #cbd5e0;
-        padding: 24px;
-        border-radius: 8px;
-        color: #4a5568;
-        text-align: center;
-      }
-      .card {
-        background: #fff;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        margin-bottom: 24px;
-        padding: 16px 20px 20px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-      }
-      .card-header {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        margin-bottom: 12px;
-      }
-      .card-title {
-        font-size: 18px;
-        font-weight: bold;
-      }
-      .highlight-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        background: #f0f5ff;
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-weight: 600;
-      }
-      .summary {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px 24px;
-        font-size: 14px;
-        margin-top: 8px;
-      }
-      .details-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 12px;
-      }
-      .details-table th,
-      .details-table td {
-        border: 1px solid #e5e5e5;
-        padding: 6px 8px;
-        font-size: 12px;
-      }
-      .items-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 16px;
-      }
-      .items-table th,
-      .items-table td {
-        border: 1px solid #e5e5e5;
-        padding: 8px;
-        font-size: 13px;
-      }
-      .items-table th {
-        background: #fafafa;
-        text-align: left;
-      }
-      .items-table input {
-        width: 100%;
-        padding: 6px;
-        box-sizing: border-box;
-      }
-      .actions {
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-        margin-top: 16px;
-      }
-      .btn {
-        border: none;
-        padding: 8px 16px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-      }
-      .btn-primary {
-        background: #2b6cb0;
-        color: #fff;
-      }
-      .btn-primary:disabled {
-        background: #9bb5d0;
-        cursor: not-allowed;
-      }
-      .btn-secondary {
-        background: #e2e8f0;
-        color: #1a202c;
-      }
-      .status {
-        font-weight: 700;
-        color: #2f855a;
-      }
-      .status.pending {
-        color: #c05621;
-      }
-      .status.cancel {
-        color: #b83280;
-      }
-      .message {
-        margin-top: 8px;
-        font-size: 12px;
-        color: #c53030;
-      }
-      .muted {
-        color: #4a5568;
-      }
-      .modal-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        display: none;
-        align-items: center;
-        justify-content: center;
-        z-index: 50;
-      }
-      .modal {
-        background: #fff;
-        border-radius: 8px;
-        padding: 20px;
-        width: 100%;
-        max-width: 420px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-      }
-      .modal h3 {
-        margin-top: 0;
-      }
-      .modal-actions {
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-        margin-top: 16px;
-      }
-      .modal a {
-        color: #2b6cb0;
-      }
+      body { font-family: Arial, sans-serif; background: #f7f7f7; margin: 0; }
+      .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+      .filter-bar { position: sticky; top: 0; z-index: 10; background: #fff; border-bottom: 1px solid #e2e8f0; }
+      .filter-content { max-width: 1200px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      .filter-group { display: flex; flex-direction: column; gap: 4px; }
+      .filter-group label { font-size: 12px; font-weight: 600; color: #2d3748; }
+      .filter-content select, .filter-content input[type="text"] { min-width: 190px; padding: 6px 8px; border-radius: 4px; border: 1px solid #cbd5e0; }
+      .empty-state { background: #fff; border: 1px dashed #cbd5e0; padding: 24px; border-radius: 8px; color: #4a5568; text-align: center; }
+      .global-message { margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; }
+      .global-message.error { display: block; background: #fff5f5; color: #c53030; border: 1px solid #feb2b2; }
+      .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 24px; padding: 16px 20px 20px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
+      .card-header { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+      .card-title { font-size: 18px; font-weight: bold; }
+      .highlight-row, .summary, .header-fields-grid, .group-row { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+      .highlight-row { background: #f0f5ff; padding: 8px 12px; border-radius: 6px; font-weight: 600; }
+      .summary { font-size: 14px; }
+      .group-row { font-size: 13px; color: #4a5568; }
+      .header-fields { border: 1px solid #edf2f7; border-radius: 6px; padding: 10px; background: #fafafa; margin-top: 4px; }
+      .header-field { min-width: 210px; display: flex; flex-direction: column; gap: 4px; }
+      .header-field label { font-size: 12px; font-weight: 600; }
+      .header-field input, .header-field select, .header-field textarea { padding: 6px 8px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 13px; }
+      .header-field textarea { min-height: 56px; resize: vertical; }
+      .inline-check { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #4a5568; }
+      .details-table, .items-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      .details-table th, .details-table td, .items-table th, .items-table td { border: 1px solid #e5e5e5; padding: 6px 8px; font-size: 12px; }
+      .items-table th { background: #fafafa; text-align: left; }
+      .items-table input { width: 100%; padding: 6px; box-sizing: border-box; }
+      .actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 16px; }
+      .btn { border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; }
+      .btn-primary { background: #2b6cb0; color: #fff; }
+      .btn-primary:disabled { background: #9bb5d0; cursor: not-allowed; }
+      .btn-secondary { background: #e2e8f0; color: #1a202c; }
+      .status { font-weight: 700; color: #2f855a; }
+      .status.pending { color: #c05621; }
+      .status.cancel { color: #b83280; }
+      .message { margin-top: 8px; font-size: 12px; color: #c53030; min-height: 18px; }
+      .muted { color: #4a5568; }
+      .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: none; align-items: center; justify-content: center; z-index: 50; }
+      .modal { background: #fff; border-radius: 8px; padding: 20px; width: 100%; max-width: 420px; }
+      .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 16px; }
     </style>
   </head>
   <body>
@@ -207,15 +51,11 @@
       <div class="filter-content">
         <div class="filter-group">
           <label for="buyerFilter">Empresa compradora</label>
-          <select id="buyerFilter">
-            <option value="">Selecione...</option>
-          </select>
+          <select id="buyerFilter"><option value="">Selecione...</option></select>
         </div>
         <div class="filter-group">
           <label for="supplierFilter">Fornecedor</label>
-          <select id="supplierFilter">
-            <option value="">Selecione...</option>
-          </select>
+          <select id="supplierFilter"><option value="">Selecione...</option></select>
         </div>
         <div class="filter-group">
           <label for="labelWidthCm">Largura etiqueta (cm)</label>
@@ -227,16 +67,16 @@
         </div>
       </div>
     </div>
+
     <div class="container">
+      <div id="globalError" class="global-message"></div>
       <div id="orders"></div>
     </div>
+
     <div id="labelsModal" class="modal-backdrop">
       <div class="modal">
         <h3>Etiquetas geradas</h3>
-        <p>
-          Acessar PDF:
-          <a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a>
-        </p>
+        <p>Acessar PDF: <a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a></p>
         <div class="modal-actions">
           <button id="closeModal" class="btn btn-primary" type="button">Ok</button>
         </div>
@@ -245,6 +85,7 @@
 
     <script>
       const ordersContainer = document.getElementById('orders');
+      const globalErrorEl = document.getElementById('globalError');
       const buyerFilter = document.getElementById('buyerFilter');
       const supplierFilter = document.getElementById('supplierFilter');
       const labelWidthInput = document.getElementById('labelWidthCm');
@@ -252,17 +93,20 @@
       const labelsModal = document.getElementById('labelsModal');
       const pdfLink = document.getElementById('pdfLink');
       const closeModal = document.getElementById('closeModal');
+
       let ordersCache = [];
+      const processingOrders = new Set();
 
       function init() {
         loadFilterOptions();
-        google.script.run
-          .withSuccessHandler((orders) => {
+
+        runServerCall('global', (runner) => runner.getOrdersWithItems(), {
+          success: (orders) => {
             ordersCache = orders || [];
             renderFilteredOrders();
-          })
-          .withFailureHandler(showError)
-          .getOrdersWithItems();
+          },
+          message: 'Falha ao carregar pedidos.'
+        });
 
         buyerFilter.addEventListener('change', renderFilteredOrders);
         supplierFilter.addEventListener('change', renderFilteredOrders);
@@ -275,25 +119,74 @@
       }
 
       function loadFilterOptions() {
-        google.script.run
-          .withSuccessHandler((options) => populateSelect(buyerFilter, options))
-          .withFailureHandler(showError)
-          .getBuyerOptions();
+        runServerCall('global', (runner) => runner.getBuyerOptions(), {
+          success: (options) => populateSelect(buyerFilter, options),
+          message: 'Falha ao carregar empresas compradoras.'
+        });
 
-        google.script.run
-          .withSuccessHandler((options) => populateSelect(supplierFilter, options))
-          .withFailureHandler(showError)
-          .getSupplierOptions();
+        runServerCall('global', (runner) => runner.getSupplierOptions(), {
+          success: (options) => populateSelect(supplierFilter, options),
+          message: 'Falha ao carregar fornecedores.'
+        });
+      }
+
+      function runServerCall(scope, invoke, options = {}) {
+        const success = options.success || (() => {});
+        const failure = options.failure || (() => {});
+        const fallbackMessage = options.message || 'Erro inesperado.';
+        clearScopedError(scope);
+
+        const runner = google.script.run
+          .withSuccessHandler(success)
+          .withFailureHandler((error) => {
+            const message = error && error.message ? error.message : fallbackMessage;
+            showScopedError(scope, message);
+            failure(error);
+          });
+
+        invoke(runner);
+      }
+
+      function showScopedError(scope, message) {
+        if (scope === 'global') {
+          globalErrorEl.textContent = message;
+          globalErrorEl.className = 'global-message error';
+          return;
+        }
+
+        const card = getCardByOc(scope);
+        if (!card) {
+          return;
+        }
+
+        const messageEl = card.querySelector('.message');
+        if (messageEl) {
+          messageEl.textContent = message;
+        }
+      }
+
+      function clearScopedError(scope) {
+        if (scope === 'global') {
+          globalErrorEl.textContent = '';
+          globalErrorEl.className = 'global-message';
+          return;
+        }
+
+        const card = getCardByOc(scope);
+        if (!card) {
+          return;
+        }
+
+        const messageEl = card.querySelector('.message');
+        if (messageEl) {
+          messageEl.textContent = '';
+        }
       }
 
       function populateSelect(select, options) {
-        const placeholder = select.querySelector('option[value=""]');
+        const placeholder = createOption_('', 'Selecione...');
         select.innerHTML = '';
-        if (placeholder) {
-          select.appendChild(placeholder);
-        } else {
-          select.appendChild(createOption_('', 'Selecione...'));
-        }
+        select.appendChild(placeholder);
         (options || []).forEach((value) => {
           select.appendChild(createOption_(value, value));
         });
@@ -309,8 +202,8 @@
       function renderFilteredOrders() {
         const buyerValue = buyerFilter.value;
         const supplierValue = supplierFilter.value;
-        const hasFilter = buyerValue || supplierValue;
-        if (!hasFilter) {
+
+        if (!buyerValue && !supplierValue) {
           renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
           return;
         }
@@ -318,6 +211,7 @@
         const filtered = ordersCache
           .filter((order) => order.status !== 'RECEBIDO')
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
+
         if (!filtered.length) {
           renderEmptyState('Nenhum pedido se adequou ao filtro.');
           return;
@@ -332,10 +226,6 @@
 
       function renderOrders(orders) {
         ordersContainer.innerHTML = '';
-        if (!orders.length) {
-          ordersContainer.innerHTML = '<div class="card">Nenhum pedido encontrado.</div>';
-          return;
-        }
 
         orders.forEach((order) => {
           const card = document.createElement('div');
@@ -344,11 +234,11 @@
 
           const statusClass = order.status === 'RECEBIDO'
             ? 'status'
-            : order.status && order.status.startsWith('CANCEL')
+            : (order.status || '').startsWith('CANCEL')
               ? 'status cancel'
               : 'status pending';
 
-          const header = `
+          card.innerHTML = `
             <div class="card-header">
               <div class="card-title">Confirmação de Pedido</div>
               <div class="highlight-row">
@@ -362,45 +252,174 @@
                 <div><strong>Qtd total:</strong> ${order.qtyTotal || 0}</div>
                 <div><strong>Valor total:</strong> R$ ${formatCurrency(order.valueTotal)}</div>
               </div>
+              <div class="group-row">
+                <div><strong>OCs agrupadas:</strong> ${escapeHtml(order.groupOcs || '-')}</div>
+                <div><strong>Envios agrupados:</strong> ${escapeHtml(order.groupSentAts || '-')}</div>
+              </div>
             </div>
           `;
 
-          card.innerHTML = header;
-
-          if (order.buyerDetails.length || order.supplierDetails.length) {
-            const detailsTable = buildDetailsTable(order);
-            card.appendChild(detailsTable);
+          card.appendChild(buildHeaderFields(order));
+          if ((order.buyerDetails || []).length || (order.supplierDetails || []).length) {
+            card.appendChild(buildDetailsTable(order));
           }
-
-          const table = buildItemsTable(order);
-          card.appendChild(table);
+          card.appendChild(buildItemsTable(order));
 
           const actions = document.createElement('div');
           actions.className = 'actions';
 
+          const cancelButton = document.createElement('button');
+          cancelButton.className = 'btn btn-secondary';
+          cancelButton.type = 'button';
+          cancelButton.textContent = 'Cancelar pedido';
+          cancelButton.addEventListener('click', () => handleCancel(order.oc));
+
+          const receiveButton = document.createElement('button');
+          receiveButton.className = 'btn btn-primary js-receive-btn';
+          receiveButton.type = 'button';
+          receiveButton.textContent = 'Recebido';
+          receiveButton.dataset.locked = order.status === 'RECEBIDO' ? 'true' : 'false';
+          receiveButton.addEventListener('click', () => handleReceived(order.oc));
+
           const message = document.createElement('div');
           message.className = 'message';
 
-          const receivedButton = document.createElement('button');
-          receivedButton.className = 'btn btn-primary';
-          receivedButton.textContent = 'Recebido';
-          receivedButton.disabled = order.status === 'RECEBIDO' || !isOrderComplete(order);
-          receivedButton.dataset.locked = order.status === 'RECEBIDO' ? 'true' : 'false';
-          receivedButton.addEventListener('click', () => handleReceived(order, receivedButton, message));
-
-          const cancelButton = document.createElement('button');
-          cancelButton.className = 'btn btn-secondary';
-          cancelButton.textContent = 'Cancelar pedido';
-          cancelButton.addEventListener('click', () => handleCancel(order));
-
           actions.appendChild(cancelButton);
-          actions.appendChild(receivedButton);
-
+          actions.appendChild(receiveButton);
           card.appendChild(actions);
           card.appendChild(message);
           ordersContainer.appendChild(card);
 
           updateOrderButtonState(order.oc);
+        });
+      }
+
+      function buildHeaderFields(order) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'header-fields';
+        wrapper.innerHTML = `
+          <div class="header-fields-grid">
+            <div class="header-field">
+              <label>NF</label>
+              <input type="text" class="js-nf-input" value="${escapeHtml(order.nf || '')}" placeholder="Número NF">
+              <label class="inline-check"><input type="checkbox" class="js-nf-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>NF Frete</label>
+              <input type="text" class="js-nf-frete-input" value="${escapeHtml(order.nfFrete || '')}" placeholder="Número NF Frete">
+              <label class="inline-check"><input type="checkbox" class="js-nf-frete-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>Boleto</label>
+              <select class="js-boleto-select">
+                <option value="">Selecione...</option>
+                <option value="VEIO">VEIO</option>
+                <option value="NÃO VEIO">NÃO VEIO</option>
+              </select>
+            </div>
+            <div class="header-field" style="flex:1 1 280px;">
+              <label>Observação / comentário</label>
+              <textarea class="js-comment-input" placeholder="Comentário do pedido">${escapeHtml(order.comment || '')}</textarea>
+            </div>
+          </div>
+        `;
+
+        const nfInput = wrapper.querySelector('.js-nf-input');
+        const nfFreteInput = wrapper.querySelector('.js-nf-frete-input');
+        const boletoSelect = wrapper.querySelector('.js-boleto-select');
+        const commentInput = wrapper.querySelector('.js-comment-input');
+        const nfNaoVeio = wrapper.querySelector('.js-nf-nao-veio');
+        const nfFreteNaoVeio = wrapper.querySelector('.js-nf-frete-nao-veio');
+
+        boletoSelect.value = normalizeBoletoValue(order.boleto);
+        applyNotProvidedState(nfInput, nfNaoVeio, order.nf);
+        applyNotProvidedState(nfFreteInput, nfFreteNaoVeio, order.nfFrete);
+
+        nfInput.addEventListener('blur', () => persistNfFields(order.oc));
+        nfFreteInput.addEventListener('blur', () => persistNfFields(order.oc));
+        boletoSelect.addEventListener('change', () => persistNfFields(order.oc));
+
+        nfNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfInput, nfNaoVeio);
+          persistNfFields(order.oc);
+          updateOrderButtonState(order.oc);
+        });
+
+        nfFreteNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfFreteInput, nfFreteNaoVeio);
+          persistNfFields(order.oc);
+          updateOrderButtonState(order.oc);
+        });
+
+        commentInput.addEventListener('blur', () => persistOrderComment(order.oc, commentInput.value));
+        commentInput.addEventListener('input', () => updateCacheField(order.oc, 'comment', commentInput.value));
+
+        [nfInput, nfFreteInput, boletoSelect].forEach((input) => {
+          input.addEventListener('input', () => updateOrderButtonState(order.oc));
+        });
+
+        return wrapper;
+      }
+
+      function applyNotProvidedState(input, checkbox, value) {
+        const isNotProvided = normalizeText(value) === 'NAO VEIO';
+        checkbox.checked = isNotProvided;
+        input.disabled = isNotProvided;
+        if (isNotProvided) {
+          input.value = 'não veio';
+        }
+      }
+
+      function toggleNaoVeio(input, checkbox) {
+        if (checkbox.checked) {
+          input.value = 'não veio';
+          input.disabled = true;
+          return;
+        }
+
+        input.disabled = false;
+        if (normalizeText(input.value) === 'NAO VEIO') {
+          input.value = '';
+        }
+      }
+
+      function normalizeBoletoValue(value) {
+        const normalized = normalizeText(value);
+        if (normalized === 'VEIO') {
+          return 'VEIO';
+        }
+        if (normalized === 'NAO VEIO') {
+          return 'NÃO VEIO';
+        }
+        return '';
+      }
+
+      function persistNfFields(oc) {
+        const card = getCardByOc(oc);
+        if (!card) {
+          return;
+        }
+
+        const nf = (card.querySelector('.js-nf-input').value || '').trim();
+        const nfFrete = (card.querySelector('.js-nf-frete-input').value || '').trim();
+        const boleto = card.querySelector('.js-boleto-select').value;
+
+        runServerCall(oc, (runner) => runner.updateOrderHeaderFields(oc, nf, nfFrete, boleto), {
+          success: () => {
+            updateCacheField(oc, 'nf', nf);
+            updateCacheField(oc, 'nfFrete', nfFrete);
+            updateCacheField(oc, 'boleto', boleto);
+            updateOrderButtonState(oc);
+          },
+          message: 'Falha ao salvar cabeçalho do pedido.'
+        });
+      }
+
+      function persistOrderComment(oc, commentValue) {
+        const comment = String(commentValue || '');
+        runServerCall(oc, (runner) => runner.updateOrderComment(oc, comment), {
+          success: () => updateCacheField(oc, 'comment', comment),
+          message: 'Falha ao salvar comentário.'
         });
       }
 
@@ -429,55 +448,67 @@
       function buildItemsTable(order) {
         const table = document.createElement('table');
         table.className = 'items-table';
-        table.innerHTML = `
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Item</th>
-              <th>Unidade</th>
-              <th>Quantidade</th>
-              <th>Valor Unitário</th>
-              <th>Total (R$)</th>
-              <th>Qtd recebida</th>
-              <th>Validade</th>
-              <th>Etiquetas</th>
-            </tr>
-          </thead>
-        `;
+        table.innerHTML = '<thead><tr><th>Código</th><th>Item</th><th>Unidade</th><th>Quantidade</th><th>Valor Unitário</th><th>Total (R$)</th><th>Qtd recebida</th><th>Validade</th><th>Etiquetas</th></tr></thead>';
 
         const body = document.createElement('tbody');
         order.items.forEach((item) => {
           const row = document.createElement('tr');
-          row.innerHTML = `
-            <td>${escapeHtml(item.code || '')}</td>
-            <td>${escapeHtml(item.item || '')}</td>
-            <td>${escapeHtml(item.unit || '')}</td>
-            <td>${formatNumber(item.qty)}</td>
-            <td>${formatCurrency(item.unitPrice)}</td>
-            <td>${formatCurrency(item.total)}</td>
-          `;
+          row.innerHTML = `<td>${escapeHtml(item.code || '')}</td><td>${escapeHtml(item.item || '')}</td><td>${escapeHtml(item.unit || '')}</td><td>${formatNumber(item.qty)}</td><td>${formatCurrency(item.unitPrice)}</td><td>${formatCurrency(item.total)}</td>`;
 
           const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
           const validityInput = buildInput('text', item.validity, 'Validade dd/MM/yyyy');
-          const labelInput = buildInput('number', item.labels, 'Etiquetas');
+          const labelsInput = buildInput('number', item.labels, 'Etiquetas');
 
-          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
-          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
-          labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
+          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelsInput, item.rowIndex));
+          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelsInput, item.rowIndex));
+          labelsInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelsInput, item.rowIndex));
 
-          qtyInput.addEventListener('input', () => updateOrderButtonState(order.oc));
-          validityInput.addEventListener('input', () => updateOrderButtonState(order.oc));
-          labelInput.addEventListener('input', () => updateOrderButtonState(order.oc));
+          [qtyInput, validityInput, labelsInput].forEach((input) => {
+            input.addEventListener('input', () => updateOrderButtonState(order.oc));
+          });
 
           row.appendChild(wrapCell(qtyInput));
           row.appendChild(wrapCell(validityInput));
-          row.appendChild(wrapCell(labelInput));
-
+          row.appendChild(wrapCell(labelsInput));
           body.appendChild(row);
         });
 
         table.appendChild(body);
         return table;
+      }
+
+      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) {
+        const qtyValue = parseNumber(qtyInput.value);
+        const validityValue = normalizeBrDateInput(validityInput.value);
+        const labelsValue = parseNumber(labelInput.value);
+
+        if (!isPositiveNumber(qtyValue)) {
+          showScopedError(oc, 'Quantidade recebida deve ser maior que zero.');
+          return;
+        }
+        if (!validityValue) {
+          showScopedError(oc, 'Validade inválida. Use dd/MM/aaaa.');
+          return;
+        }
+        if (!isPositiveInteger(labelsValue)) {
+          showScopedError(oc, 'Etiquetas deve ser um inteiro positivo.');
+          return;
+        }
+
+        validityInput.value = validityValue;
+
+        runServerCall(oc, (runner) => runner.updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue, rowIndex), {
+          success: () => {
+            updateItemCache(oc, lineNo, {
+              qtyReceived: qtyValue,
+              validity: validityValue,
+              labels: labelsValue,
+              rowIndex,
+            });
+            updateOrderButtonState(oc);
+          },
+          message: 'Falha ao salvar item.'
+        });
       }
 
       function buildInput(type, value, placeholder) {
@@ -496,115 +527,156 @@
         return td;
       }
 
-      function saveItem(oc, lineNo, qtyInput, validityInput, labelInput, rowIndex) {
-        const qtyValue = qtyInput.value === '' ? '' : Number(qtyInput.value);
-        const validityValue = validityInput.value;
-        const labelsValue = labelInput.value === '' ? '' : Number(labelInput.value);
-
-        google.script.run
-          .withFailureHandler(showError)
-          .updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue, rowIndex);
-      }
-
       function updateOrderButtonState(oc) {
-        const card = document.querySelector(`.card[data-oc="${cssEscape(oc)}"]`);
+        const card = getCardByOc(oc);
         if (!card) {
           return;
         }
-        const inputs = card.querySelectorAll('tbody tr');
-        let complete = true;
-        inputs.forEach((row) => {
-          const fields = row.querySelectorAll('input');
-          const qty = fields[0].value;
-          const validity = fields[1].value;
-          const labels = fields[2].value;
-          if (!isPositiveNumber(qty) || !isValidDate(validity) || !isPositiveInteger(labels)) {
-            complete = false;
-          }
-        });
-        const button = card.querySelector('.btn-primary');
+
+        const button = card.querySelector('.js-receive-btn');
         if (!button || button.dataset.locked === 'true') {
           return;
         }
-        button.disabled = !complete;
+
+        button.disabled = processingOrders.has(String(oc)) || !isOrderComplete(getOrderStateFromCard(card));
+      }
+
+      function getOrderStateFromCard(card) {
+        const rows = [...card.querySelectorAll('.items-table tbody tr')];
+        const items = rows.map((row) => {
+          const fields = row.querySelectorAll('input');
+          return {
+            qtyReceived: parseNumber(fields[0].value),
+            validity: normalizeBrDateInput(fields[1].value),
+            labels: parseNumber(fields[2].value),
+          };
+        });
+
+        return {
+          nf: (card.querySelector('.js-nf-input').value || '').trim(),
+          nfFrete: (card.querySelector('.js-nf-frete-input').value || '').trim(),
+          boleto: card.querySelector('.js-boleto-select').value,
+          items,
+        };
       }
 
       function isOrderComplete(order) {
-        return order.items.every((item) => {
+        const headerOk = !!order.nf && !!order.nfFrete && ['VEIO', 'NÃO VEIO'].includes(order.boleto);
+        const itemsOk = (order.items || []).length > 0 && order.items.every((item) => {
           return isPositiveNumber(item.qtyReceived)
-            && isValidDate(item.validity)
+            && !!normalizeBrDateInput(item.validity)
             && isPositiveInteger(item.labels);
         });
+
+        return headerOk && itemsOk;
       }
 
-      function handleReceived(order, button, message) {
-        message.textContent = '';
+      function handleReceived(oc) {
+        const card = getCardByOc(oc);
+        if (!card || processingOrders.has(String(oc))) {
+          return;
+        }
+
+        clearScopedError(oc);
+
         const labelWidth = parseNumber(labelWidthInput.value);
         const labelHeight = parseNumber(labelHeightInput.value);
         if (!isPositiveNumber(labelWidth) || !isPositiveNumber(labelHeight)) {
-          message.textContent = 'Informe largura e altura válidas para as etiquetas.';
+          showScopedError(oc, 'Informe largura e altura válidas para as etiquetas.');
           return;
         }
-        const printWindow = window.open('about:blank', '_blank');
-        if (printWindow) {
-          printWindow.document.write('<p>Gerando PDF...</p>');
-        }
-        button.disabled = true;
-        button.textContent = 'Processando...';
 
-        google.script.run
-          .withSuccessHandler((response) => {
-            button.dataset.locked = 'true';
-            removeOrderFromCache(order.oc);
-            removeOrderCard(order.oc);
-            const fileId = response && response.pdfFileId ? response.pdfFileId : '';
-            const printUrl = buildPrintUrl(fileId);
-            if (printWindow && printUrl) {
-              printWindow.location.href = printUrl;
-            } else if (response && response.pdfUrl) {
-              window.open(response.pdfUrl, '_blank', 'noopener');
+        const orderState = getOrderStateFromCard(card);
+        if (!isOrderComplete(orderState)) {
+          showScopedError(oc, 'Preencha cabeçalho e itens obrigatórios para concluir o recebimento.');
+          return;
+        }
+
+        processingOrders.add(String(oc));
+        const button = card.querySelector('.js-receive-btn');
+        if (button) {
+          button.disabled = true;
+          button.textContent = 'Processando...';
+        }
+
+        runServerCall(oc, (runner) => runner.receiveOrder(oc, labelWidth, labelHeight), {
+          success: (response) => {
+            processingOrders.delete(String(oc));
+
+            if (button) {
+              button.textContent = 'Recebido';
+              button.dataset.locked = 'true';
             }
+
+            updateCacheField(oc, 'status', (response && response.status) || 'RECEBIDO');
+            updateCacheField(oc, 'receivedAt', new Date().toISOString());
+            renderFilteredOrders();
+
+            const printUrl = buildPrintUrl(response && response.pdfFileId ? response.pdfFileId : '');
+            if (printUrl) {
+              window.open(printUrl, '_blank', 'noopener');
+            }
+
             openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
-          })
-          .withFailureHandler((error) => {
-            button.disabled = false;
-            button.textContent = 'Recebido';
-            message.textContent = error.message || 'Falha ao marcar como recebido.';
-            if (printWindow) {
-              printWindow.close();
+          },
+          failure: () => {
+            processingOrders.delete(String(oc));
+            if (button) {
+              button.textContent = 'Recebido';
+              updateOrderButtonState(oc);
             }
-          })
-          .receiveOrder(order.oc, labelWidth, labelHeight);
+          },
+          message: 'Falha ao marcar pedido como recebido.'
+        });
       }
 
-      function handleCancel(order) {
-        const confirmed = confirm('Tem certeza que deseja cancelar este pedido?');
-        if (!confirmed) {
+      function handleCancel(oc) {
+        if (!confirm('Tem certeza que deseja cancelar este pedido?')) {
           return;
         }
 
-        google.script.run
-          .withSuccessHandler(() => {
-            alert('Pedido marcado para cancelamento.');
+        runServerCall(oc, (runner) => runner.cancelOrderStub(oc), {
+          success: (response) => {
+            updateCacheField(oc, 'status', (response && response.status) || 'CANCEL_PENDENTE');
             renderFilteredOrders();
-          })
-          .withFailureHandler(showError)
-          .cancelOrderStub(order.oc);
+          },
+          message: 'Falha ao cancelar pedido.'
+        });
+      }
+
+      function getOrderByOc(oc) {
+        return ordersCache.find((order) => String(order.oc) === String(oc));
+      }
+
+      function getCardByOc(oc) {
+        return document.querySelector(`.card[data-oc="${cssEscape(oc)}"]`);
+      }
+
+      function updateCacheField(oc, field, value) {
+        const order = getOrderByOc(oc);
+        if (!order) {
+          return;
+        }
+        order[field] = value;
+      }
+
+      function updateItemCache(oc, lineNo, values) {
+        const order = getOrderByOc(oc);
+        if (!order) {
+          return;
+        }
+        const item = (order.items || []).find((entry) => Number(entry.lineNo) === Number(lineNo));
+        if (!item) {
+          return;
+        }
+        Object.assign(item, values);
       }
 
       function renderDetailsList(list) {
         if (!list || !list.length) {
           return '<span class="muted">Sem detalhes</span>';
         }
-        return `
-          <ul>
-            ${list.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
-          </ul>
-        `;
-      }
-
-      function showError(error) {
-        alert(error.message || 'Erro inesperado.');
+        return `<ul>${list.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}</ul>`;
       }
 
       function parseNumber(value) {
@@ -615,21 +687,39 @@
       }
 
       function isPositiveNumber(value) {
-        const numberValue = parseNumber(value);
-        return !Number.isNaN(numberValue) && numberValue > 0;
+        const numeric = Number(value);
+        return !Number.isNaN(numeric) && numeric > 0;
       }
 
       function isPositiveInteger(value) {
-        const numberValue = parseNumber(value);
-        return Number.isInteger(numberValue) && numberValue > 0;
+        const numeric = Number(value);
+        return Number.isInteger(numeric) && numeric > 0;
       }
 
-      function isValidDate(value) {
+      function normalizeBrDateInput(value) {
         if (!value) {
-          return false;
+          return '';
         }
-        const normalized = String(value).trim().replace(/[-.]/g, '/');
-        return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized);
+
+        const clean = String(value).trim().replace(/[-.]/g, '/');
+        const parts = clean.split('/');
+        if (parts.length !== 3) {
+          return '';
+        }
+
+        const day = Number(parts[0]);
+        const month = Number(parts[1]);
+        const year = Number(parts[2]);
+        if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) {
+          return '';
+        }
+
+        const date = new Date(year, month - 1, day);
+        if (date.getFullYear() !== year || date.getMonth() !== (month - 1) || date.getDate() !== day) {
+          return '';
+        }
+
+        return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${String(year).padStart(4, '0')}`;
       }
 
       function openLabelsModal(url) {
@@ -641,31 +731,16 @@
         labelsModal.style.display = 'none';
       }
 
-      function removeOrderCard(oc) {
-        const card = document.querySelector(`.card[data-oc="${cssEscape(oc)}"]`);
-        if (card) {
-          card.remove();
-        }
-        if (!ordersContainer.children.length) {
-          renderFilteredOrders();
-        }
-      }
-
-      function removeOrderFromCache(oc) {
-        ordersCache = ordersCache.filter((order) => order.oc !== oc);
-      }
-
       function buildPrintUrl(fileId) {
         if (!fileId) {
           return '';
         }
-        const baseUrl = window.location.href.split('?')[0];
-        return `${baseUrl}?view=print&fileId=${encodeURIComponent(fileId)}`;
+        const base = window.location.href.split('?')[0];
+        return `${base}?view=print&fileId=${encodeURIComponent(fileId)}`;
       }
 
       function formatCurrency(value) {
-        const numberValue = Number(value || 0);
-        return numberValue.toLocaleString('pt-BR', {
+        return Number(value || 0).toLocaleString('pt-BR', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         });
@@ -680,24 +755,17 @@
           return '-';
         }
         const date = new Date(value);
-        if (Number.isNaN(date.getTime())) {
-          return value;
-        }
-        return date.toLocaleString('pt-BR');
+        return Number.isNaN(date.getTime()) ? value : date.toLocaleString('pt-BR');
       }
 
       function escapeHtml(value) {
-        const text = String(value || '');
-        return text.replace(/[&<>"']/g, (char) => {
-          const map = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;',
-          };
-          return map[char] || char;
-        });
+        return String(value || '').replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        }[char] || char));
       }
 
       function cssEscape(value) {
@@ -714,12 +782,11 @@
       }
 
       function matchesFilter(order, buyerValue, supplierValue) {
-        const buyerMatch = buyerValue
-          ? normalizeText(order.buyerSelected) === normalizeText(buyerValue)
-          : true;
-        const supplierMatch = supplierValue
-          ? normalizeText(order.supplierSelected) === normalizeText(supplierValue)
-          : true;
+        const buyerText = `${order.buyerSelected || ''} ${(order.buyerDetails || []).join(' ')}`;
+        const supplierText = `${order.supplierSelected || ''} ${(order.supplierDetails || []).join(' ')}`;
+
+        const buyerMatch = buyerValue ? normalizeText(buyerText).includes(normalizeText(buyerValue)) : true;
+        const supplierMatch = supplierValue ? normalizeText(supplierText).includes(normalizeText(supplierValue)) : true;
         return buyerMatch && supplierMatch;
       }
 
