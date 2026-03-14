@@ -156,6 +156,7 @@
         o.textContent = label;
         return o;
       }
+      function createOption_(value, label) { const o = document.createElement('option'); o.value = value; o.textContent = label; return o; }
 
       function renderFilteredOrders() {
         const buyerValue = buyerFilter.value;
@@ -174,10 +175,7 @@
         }
         renderOrders(filtered);
       }
-
-      function renderEmptyState(message) {
-        ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
-      }
+      function renderEmptyState(message) { ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`; }
 
       function renderOrders(orders) {
         ordersContainer.innerHTML = '';
@@ -245,7 +243,149 @@
           card.appendChild(message);
           ordersContainer.appendChild(card);
 
+      function applyNotProvidedState(input, checkbox, value) {
+        const marked = normalizeText(value) === 'NAO VEIO';
+        checkbox.checked = marked;
+        input.disabled = marked;
+        if (marked) input.value = 'não veio';
+      }
+      function toggleNaoVeio(input, checkbox) { if (checkbox.checked) { input.value = 'não veio'; input.disabled = true; } else { input.disabled = false; if (normalizeText(input.value) === 'NAO VEIO') input.value = ''; } }
+      function normalizeBoletoValue(v) { const n = normalizeText(v); if (n === 'VEIO') return 'VEIO'; if (n === 'NAO VEIO') return 'NÃO VEIO'; return ''; }
+
+      function persistNfFields(order, card) {
+        const nfInput = card.querySelector('.js-nf-input');
+        const nfFreteInput = card.querySelector('.js-nf-frete-input');
+        const boletoSelect = card.querySelector('.js-boleto-select');
+        const nfValue = (nfInput.value || '').trim();
+        const nfFreteValue = (nfFreteInput.value || '').trim();
+        const boletoValue = boletoSelect.value;
+        google.script.run.withSuccessHandler(() => {
+          updateCacheField(order.oc, 'nf', nfValue);
+          updateCacheField(order.oc, 'nfFrete', nfFreteValue);
+          updateCacheField(order.oc, 'boleto', boletoValue);
           updateOrderButtonState(order.oc);
+        }).withFailureHandler(showError).updateOrderHeaderFields(order.oc, nfValue, nfFreteValue, boletoValue);
+      }
+
+      function persistOrderComment(order, commentValue) {
+        const comment = String(commentValue || '');
+        google.script.run.withSuccessHandler(() => updateCacheField(order.oc, 'comment', comment)).withFailureHandler(showError).updateOrderComment(order.oc, comment);
+      }
+
+      function buildHeaderFields(order) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'header-fields';
+        wrapper.innerHTML = `
+          <div class="header-fields-grid">
+            <div class="header-field">
+              <label>NF</label>
+              <input type="text" class="js-nf-input" value="${escapeHtml(order.nf || '')}" placeholder="Número NF">
+              <label class="inline-check"><input type="checkbox" class="js-nf-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>NF Frete</label>
+              <input type="text" class="js-nf-frete-input" value="${escapeHtml(order.nfFrete || '')}" placeholder="Número NF Frete">
+              <label class="inline-check"><input type="checkbox" class="js-nf-frete-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>Boleto</label>
+              <select class="js-boleto-select">
+                <option value="">Selecione...</option>
+                <option value="VEIO">VEIO</option>
+                <option value="NÃO VEIO">NÃO VEIO</option>
+              </select>
+            </div>
+            <div class="header-field" style="flex:1 1 280px;">
+              <label>Observação / comentário</label>
+              <textarea class="js-comment-input" placeholder="Comentário do pedido">${escapeHtml(order.comment || '')}</textarea>
+            </div>
+          </div>
+        `;
+
+        const nfInput = wrapper.querySelector('.js-nf-input');
+        const nfFreteInput = wrapper.querySelector('.js-nf-frete-input');
+        const boletoSelect = wrapper.querySelector('.js-boleto-select');
+        const commentInput = wrapper.querySelector('.js-comment-input');
+        const nfNaoVeio = wrapper.querySelector('.js-nf-nao-veio');
+        const nfFreteNaoVeio = wrapper.querySelector('.js-nf-frete-nao-veio');
+
+        boletoSelect.value = normalizeBoletoValue(order.boleto);
+        applyNotProvidedState(nfInput, nfNaoVeio, order.nf);
+        applyNotProvidedState(nfFreteInput, nfFreteNaoVeio, order.nfFrete);
+
+        const persistHeader = () => persistNfFields(order.oc);
+
+        nfInput.addEventListener('blur', persistHeader);
+        nfFreteInput.addEventListener('blur', persistHeader);
+        boletoSelect.addEventListener('change', persistHeader);
+
+        nfNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfInput, nfNaoVeio);
+          persistHeader();
+          updateOrderButtonState(order.oc);
+        });
+
+        nfFreteNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfFreteInput, nfFreteNaoVeio);
+          persistHeader();
+          updateOrderButtonState(order.oc);
+        });
+
+        commentInput.addEventListener('blur', () => persistOrderComment(order.oc, commentInput.value));
+        commentInput.addEventListener('input', () => updateCacheField(order.oc, 'comment', commentInput.value));
+
+        [nfInput, nfFreteInput, boletoSelect].forEach((el) => el.addEventListener('input', () => updateOrderButtonState(order.oc)));
+        return wrapper;
+      }
+
+      function applyNotProvidedState(input, checkbox, value) {
+        const marked = normalizeText(value) === 'NAO VEIO';
+        checkbox.checked = marked;
+        input.disabled = marked;
+        if (marked) input.value = 'não veio';
+      }
+
+      function toggleNaoVeio(input, checkbox) {
+        if (checkbox.checked) {
+          input.value = 'não veio';
+          input.disabled = true;
+          return;
+        }
+        input.disabled = false;
+        if (normalizeText(input.value) === 'NAO VEIO') input.value = '';
+      }
+
+      function normalizeBoletoValue(value) {
+        const n = normalizeText(value);
+        if (n === 'VEIO') return 'VEIO';
+        if (n === 'NAO VEIO') return 'NÃO VEIO';
+        return '';
+      }
+
+      function persistNfFields(oc) {
+        const card = getCardByOc(oc);
+        if (!card) return;
+
+        const nfValue = (card.querySelector('.js-nf-input').value || '').trim();
+        const nfFreteValue = (card.querySelector('.js-nf-frete-input').value || '').trim();
+        const boletoValue = card.querySelector('.js-boleto-select').value;
+
+        runServerCall(oc, (runner) => runner.updateOrderHeaderFields(oc, nfValue, nfFreteValue, boletoValue), {
+          success: () => {
+            updateCacheField(oc, 'nf', nfValue);
+            updateCacheField(oc, 'nfFrete', nfFreteValue);
+            updateCacheField(oc, 'boleto', boletoValue);
+            updateOrderButtonState(oc);
+          },
+          message: 'Falha ao salvar os campos de cabeçalho.'
+        });
+      }
+
+      function persistOrderComment(oc, commentValue) {
+        const comment = String(commentValue || '');
+        runServerCall(oc, (runner) => runner.updateOrderComment(oc, comment), {
+          success: () => updateCacheField(oc, 'comment', comment),
+          message: 'Falha ao salvar comentário.'
         });
       }
 
@@ -370,22 +510,8 @@
         const wrapper = document.createElement('div');
         const table = document.createElement('table');
         table.className = 'details-table';
-        table.innerHTML = `
-          <thead>
-            <tr>
-              <th colspan="2">Detalhes do Comprador</th>
-              <th colspan="2">Detalhes do Fornecedor</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td colspan="2">${renderDetailsList(order.buyerDetails)}</td>
-              <td colspan="2">${renderDetailsList(order.supplierDetails)}</td>
-            </tr>
-          </tbody>
-        `;
-        wrapper.appendChild(table);
-        return wrapper;
+        table.innerHTML = `<thead><tr><th colspan="2">Detalhes do Comprador</th><th colspan="2">Detalhes do Fornecedor</th></tr></thead><tbody><tr><td colspan="2">${renderDetailsList(order.buyerDetails)}</td><td colspan="2">${renderDetailsList(order.supplierDetails)}</td></tr></tbody>`;
+        wrapper.appendChild(table); return wrapper;
       }
 
       function buildItemsTable(order) {
@@ -401,9 +527,8 @@
           const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
           const validityInput = buildInput('text', item.validity, 'Validade dd/MM/yyyy');
           const labelInput = buildInput('number', item.labels, 'Etiquetas');
-
+          validityInput.addEventListener('blur', () => { validityInput.value = normalizeBrDateInput(validityInput.value) || validityInput.value; saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex); });
           qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
-          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
           labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
 
           [qtyInput, validityInput, labelInput].forEach((el) => {
@@ -415,7 +540,6 @@
           row.appendChild(wrapCell(labelInput));
           body.appendChild(row);
         });
-
         table.appendChild(body);
         return table;
       }
