@@ -55,10 +55,11 @@ function doGet(e) {
     if (!fileId) {
       return HtmlService.createHtmlOutput('<p>Arquivo não informado.</p>');
     }
+
     try {
       const file = DriveApp.getFileById(fileId);
       const base64 = Utilities.base64Encode(file.getBlob().getBytes());
-      // Mantém resposta simples via data URL; para PDFs muito grandes pode haver limitação de tamanho no navegador.
+      // Mantém resposta simples via data URL; para PDFs muito grandes pode haver limitação no navegador.
       const dataUrl = `data:application/pdf;base64,${base64}`;
       const safeDataUrl = dataUrl.replace(/"/g, '&quot;');
       const html = '<!doctype html><html><head><meta charset="utf-8"><title>PDF</title>'
@@ -95,11 +96,20 @@ function getOrdersWithItems() {
 }
 
 function getBuyerOptions() {
-  return getNamedRangeColumnValues_(getSpreadsheet_(), 'EMP_COMP', 'A');
+  return getNamedRangeFirstColumnValues_(getSpreadsheet_(), 'EMP_COMP');
 }
 
 function getSupplierOptions() {
-  return getNamedRangeColumnValues_(getSpreadsheet_(), 'EMP_FORN', 'A');
+  return getNamedRangeFirstColumnValues_(getSpreadsheet_(), 'EMP_FORN');
+}
+
+function getNamedRangeFirstColumnValues_(spreadsheet, rangeName) {
+  const range = getNamedRange_(spreadsheet, rangeName);
+  const values = range.getValues();
+  return values
+    .map((row) => row[0])
+    .filter((value) => value !== null && value !== undefined && String(value).trim() !== '')
+    .map((value) => String(value).trim());
 }
 
 function updateOrderHeaderFields(oc, nfValue, nfFreteValue, boletoValue) {
@@ -135,6 +145,7 @@ function updateOrderCommentField(oc, commentText) {
   if (!oc) {
     throw new Error('OC inválida.');
   }
+
   const spreadsheet = getSpreadsheet_();
   const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
   const row = findOrderRowByOcInRange_(ordersRange, oc);
@@ -220,6 +231,7 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
     if (!items.length) {
       throw new Error('Itens não encontrados.');
     }
+
     if (items.some((item) => !isItemCompleteWithLabels_(item))) {
       throw new Error('Preencha quantidade recebida, validade válida e etiquetas em todas as linhas.');
     }
@@ -254,12 +266,14 @@ function markReceived(oc) {
   if (!order) {
     throw new Error('Pedido não encontrado.');
   }
+
   validateOrderHeaderForReceive_(order);
 
   const items = readItemsByOcFromRange_(itemsRange)[oc] || [];
   if (!items.length) {
     throw new Error('Itens não encontrados.');
   }
+
   if (items.some((item) => !isItemCompleteWithLabels_(item))) {
     throw new Error('Preencha todos os campos obrigatórios antes de receber.');
   }
@@ -301,6 +315,7 @@ function getSpreadsheet_() {
   if (!SPREADSHEET_ID || SPREADSHEET_ID === 'YOUR_SPREADSHEET_ID_HERE') {
     throw new Error('SPREADSHEET_ID não configurado.');
   }
+
   try {
     return SpreadsheetApp.openById(SPREADSHEET_ID);
   } catch (error) {
@@ -316,59 +331,19 @@ function getNamedRange_(spreadsheet, rangeName) {
   return range;
 }
 
-function getNamedRangeOptions_(spreadsheet, rangeName) {
-  const values = getNamedRange_(spreadsheet, rangeName).getValues();
-  return values
-    .map((row) => row[0])
-    .filter((value) => value !== null && value !== '')
-    .map((value) => String(value));
-}
-
-function getNamedRangeColumnValues_(spreadsheet, rangeName, absColumnLetter) {
-  const range = getNamedRange_(spreadsheet, rangeName);
-  const values = range.getValues();
-  if (!values.length) {
-    return [];
-  }
-
-  const rangeStartColumn = range.getColumn();
-  const absoluteColumn = colLetterToIndex_(absColumnLetter);
-  const relativeIndex = absoluteColumn - rangeStartColumn;
-
-  if (relativeIndex < 0 || relativeIndex >= range.getNumColumns()) {
-    throw new Error(`A coluna ${absColumnLetter} não está contida no named range ${rangeName}.`);
-  }
-
-  return values
-    .map((row) => row[relativeIndex])
-    .filter((value) => value !== null && value !== undefined && String(value).trim() !== '')
-    .map((value) => String(value).trim());
-}
-
-function colLetterToIndex_(letter) {
-  const text = String(letter || '').trim().toUpperCase();
-  if (!/^[A-Z]+$/.test(text)) {
-    throw new Error(`Coluna inválida: ${letter}`);
-  }
-
-  let index = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    index = (index * 26) + (text.charCodeAt(i) - 64);
-  }
-  return index;
-}
-
 function deleteLastPdf_() {
   const props = PropertiesService.getScriptProperties();
   const lastId = props.getProperty(LAST_LABELS_PDF_PROPERTY);
   if (!lastId) {
     return;
   }
+
   try {
     DriveApp.getFileById(lastId).setTrashed(true);
   } catch (error) {
     // Ignora erro de arquivo ausente.
   }
+
   props.deleteProperty(LAST_LABELS_PDF_PROPERTY);
 }
 
@@ -399,10 +374,12 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
     while (slice.length < 3) {
       slice.push(null);
     }
+
     const labelsHtml = slice.map((entry) => {
       if (!entry) {
         return '<div class="label label-empty"></div>';
       }
+
       return `
         <div class="label">
           <div class="label-line"><strong>OC:</strong> ${escapeHtml_(entry.oc)}</div>
@@ -414,6 +391,7 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
         </div>
       `;
     });
+
     pages.push(`<div class="page">${labelsHtml.join('')}</div>`);
   }
 
@@ -443,9 +421,7 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
             flex-direction: column;
             justify-content: center;
           }
-          .label-empty {
-            border-color: transparent;
-          }
+          .label-empty { border-color: transparent; }
           .label-line { line-height: 1.2; }
         </style>
       </head>
@@ -562,7 +538,8 @@ function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
   const startCol = range.getColumn();
   const startRow = range.getRow();
   const values = range.getValues();
-  // Mantemos Date real para melhor compatibilidade com filtros e ordenações de planilha.
+
+  // Mantém Date real para compatibilidade com filtros/ordenações na planilha.
   values.forEach((row, index) => {
     if (String(row[ITEM_RANGE_MAP.oc]) !== String(order.oc)) {
       return;
@@ -607,6 +584,7 @@ function normalizeBrDateInput_(value) {
   if (value === null || value === undefined) {
     return '';
   }
+
   const clean = String(value).trim();
   if (!clean) {
     return '';
@@ -634,6 +612,7 @@ function isValidBrDateStrict_(value) {
   if (typeof value !== 'string') {
     return false;
   }
+
   const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!match) {
     return false;
@@ -691,10 +670,6 @@ function sanitizeText_(value) {
     return '';
   }
   return String(value).trim();
-}
-
-function formatDateTime_(value) {
-  return Utilities.formatDate(value, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
 }
 
 function escapeHtml_(value) {

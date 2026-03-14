@@ -14,7 +14,7 @@
       .empty-state { background: #fff; border: 1px dashed #cbd5e0; padding: 24px; border-radius: 8px; color: #4a5568; text-align: center; }
       .global-message { margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; }
       .global-message.error { display: block; background: #fff5f5; color: #c53030; border: 1px solid #feb2b2; }
-      .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 24px; padding: 16px 20px 20px; box-shadow: 0 2px 4px rgba(0,0,0,.05); }
+      .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 24px; padding: 16px 20px 20px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
       .card-header { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
       .card-title { font-size: 18px; font-weight: bold; }
       .highlight-row, .summary, .header-fields-grid, .group-row { display: flex; flex-wrap: wrap; gap: 10px 18px; }
@@ -41,23 +41,47 @@
       .status.cancel { color: #b83280; }
       .message { margin-top: 8px; font-size: 12px; color: #c53030; min-height: 18px; }
       .muted { color: #4a5568; }
-      .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 50; }
+      .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: none; align-items: center; justify-content: center; z-index: 50; }
       .modal { background: #fff; border-radius: 8px; padding: 20px; width: 100%; max-width: 420px; }
       .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 16px; }
     </style>
   </head>
   <body>
-    <div class="filter-bar"><div class="filter-content">
-      <div class="filter-group"><label for="buyerFilter">Empresa compradora</label><select id="buyerFilter"><option value="">Selecione...</option></select></div>
-      <div class="filter-group"><label for="supplierFilter">Fornecedor</label><select id="supplierFilter"><option value="">Selecione...</option></select></div>
-      <div class="filter-group"><label for="labelWidthCm">Largura etiqueta (cm)</label><input id="labelWidthCm" type="text" placeholder="Ex: 5,0"></div>
-      <div class="filter-group"><label for="labelHeightCm">Altura etiqueta (cm)</label><input id="labelHeightCm" type="text" placeholder="Ex: 3,0"></div>
-    </div></div>
+    <div class="filter-bar">
+      <div class="filter-content">
+        <div class="filter-group">
+          <label for="buyerFilter">Empresa compradora</label>
+          <select id="buyerFilter"><option value="">Selecione...</option></select>
+        </div>
+        <div class="filter-group">
+          <label for="supplierFilter">Fornecedor</label>
+          <select id="supplierFilter"><option value="">Selecione...</option></select>
+        </div>
+        <div class="filter-group">
+          <label for="labelWidthCm">Largura etiqueta (cm)</label>
+          <input id="labelWidthCm" type="text" placeholder="Ex: 5,0">
+        </div>
+        <div class="filter-group">
+          <label for="labelHeightCm">Altura etiqueta (cm)</label>
+          <input id="labelHeightCm" type="text" placeholder="Ex: 3,0">
+        </div>
+      </div>
+    </div>
+
     <div class="container">
       <div id="globalError" class="global-message"></div>
       <div id="orders"></div>
     </div>
-    <div id="labelsModal" class="modal-backdrop"><div class="modal"><h3>Etiquetas geradas</h3><p>Acessar PDF: <a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a></p><div class="modal-actions"><button id="closeModal" class="btn btn-primary" type="button">Ok</button></div></div></div>
+
+    <div id="labelsModal" class="modal-backdrop">
+      <div class="modal">
+        <h3>Etiquetas geradas</h3>
+        <p>Acessar PDF: <a id="pdfLink" href="#" target="_blank" rel="noopener">Abrir PDF</a></p>
+        <div class="modal-actions">
+          <button id="closeModal" class="btn btn-primary" type="button">Ok</button>
+        </div>
+      </div>
+    </div>
 
     <script>
       const ordersContainer = document.getElementById('orders');
@@ -75,6 +99,7 @@
 
       function init() {
         loadFilterOptions();
+
         runServerCall('global', (runner) => runner.getOrdersWithItems(), {
           success: (orders) => {
             ordersCache = orders || [];
@@ -96,6 +121,7 @@
           success: (options) => populateSelect(buyerFilter, options),
           message: 'Falha ao carregar empresas compradoras.'
         });
+
         runServerCall('global', (runner) => runner.getSupplierOptions(), {
           success: (options) => populateSelect(supplierFilter, options),
           message: 'Falha ao carregar fornecedores.'
@@ -104,16 +130,16 @@
 
       function runServerCall(scope, invoke, options = {}) {
         const success = options.success || (() => {});
+        const failure = options.failure || (() => {});
         const fallbackMessage = options.message || 'Erro inesperado.';
-        const onFailure = options.failure || (() => {});
         clearScopedError(scope);
 
         const runner = google.script.run
           .withSuccessHandler(success)
           .withFailureHandler((error) => {
-            const msg = (error && error.message) ? error.message : fallbackMessage;
-            showScopedError(scope, msg);
-            onFailure(error);
+            const message = error && error.message ? error.message : fallbackMessage;
+            showScopedError(scope, message);
+            failure(error);
           });
 
         invoke(runner);
@@ -125,10 +151,16 @@
           globalErrorEl.className = 'global-message error';
           return;
         }
+
         const card = getCardByOc(scope);
-        if (!card) return;
+        if (!card) {
+          return;
+        }
+
         const messageEl = card.querySelector('.message');
-        if (messageEl) messageEl.textContent = message;
+        if (messageEl) {
+          messageEl.textContent = message;
+        }
       }
 
       function clearScopedError(scope) {
@@ -137,17 +169,25 @@
           globalErrorEl.className = 'global-message';
           return;
         }
+
         const card = getCardByOc(scope);
-        if (!card) return;
+        if (!card) {
+          return;
+        }
+
         const messageEl = card.querySelector('.message');
-        if (messageEl) messageEl.textContent = '';
+        if (messageEl) {
+          messageEl.textContent = '';
+        }
       }
 
       function populateSelect(select, options) {
-        const placeholder = select.querySelector('option[value=""]');
+        const placeholder = createOption_('', 'Selecione...');
         select.innerHTML = '';
-        select.appendChild(placeholder || createOption_('', 'Selecione...'));
-        (options || []).forEach((value) => select.appendChild(createOption_(value, value)));
+        select.appendChild(placeholder);
+        (options || []).forEach((value) => {
+          select.appendChild(createOption_(value, value));
+        });
       }
 
       function createOption_(value, label) {
@@ -161,6 +201,7 @@
       function renderFilteredOrders() {
         const buyerValue = buyerFilter.value;
         const supplierValue = supplierFilter.value;
+
         if (!buyerValue && !supplierValue) {
           renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
           return;
@@ -623,6 +664,135 @@
         });
       }
 
+      function buildHeaderFields(order) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'header-fields';
+        wrapper.innerHTML = `
+          <div class="header-fields-grid">
+            <div class="header-field">
+              <label>NF</label>
+              <input type="text" class="js-nf-input" value="${escapeHtml(order.nf || '')}" placeholder="Número NF">
+              <label class="inline-check"><input type="checkbox" class="js-nf-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>NF Frete</label>
+              <input type="text" class="js-nf-frete-input" value="${escapeHtml(order.nfFrete || '')}" placeholder="Número NF Frete">
+              <label class="inline-check"><input type="checkbox" class="js-nf-frete-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>Boleto</label>
+              <select class="js-boleto-select">
+                <option value="">Selecione...</option>
+                <option value="VEIO">VEIO</option>
+                <option value="NÃO VEIO">NÃO VEIO</option>
+              </select>
+            </div>
+            <div class="header-field" style="flex:1 1 280px;">
+              <label>Observação / comentário</label>
+              <textarea class="js-comment-input" placeholder="Comentário do pedido">${escapeHtml(order.comment || '')}</textarea>
+            </div>
+          </div>
+        `;
+
+        const nfInput = wrapper.querySelector('.js-nf-input');
+        const nfFreteInput = wrapper.querySelector('.js-nf-frete-input');
+        const boletoSelect = wrapper.querySelector('.js-boleto-select');
+        const commentInput = wrapper.querySelector('.js-comment-input');
+        const nfNaoVeio = wrapper.querySelector('.js-nf-nao-veio');
+        const nfFreteNaoVeio = wrapper.querySelector('.js-nf-frete-nao-veio');
+
+        boletoSelect.value = normalizeBoletoValue(order.boleto);
+        applyNotProvidedState(nfInput, nfNaoVeio, order.nf);
+        applyNotProvidedState(nfFreteInput, nfFreteNaoVeio, order.nfFrete);
+
+        nfInput.addEventListener('blur', () => persistNfFields(order.oc));
+        nfFreteInput.addEventListener('blur', () => persistNfFields(order.oc));
+        boletoSelect.addEventListener('change', () => persistNfFields(order.oc));
+
+        nfNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfInput, nfNaoVeio);
+          persistNfFields(order.oc);
+          updateOrderButtonState(order.oc);
+        });
+
+        nfFreteNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfFreteInput, nfFreteNaoVeio);
+          persistNfFields(order.oc);
+          updateOrderButtonState(order.oc);
+        });
+
+        commentInput.addEventListener('blur', () => persistOrderComment(order.oc, commentInput.value));
+        commentInput.addEventListener('input', () => updateCacheField(order.oc, 'comment', commentInput.value));
+
+        [nfInput, nfFreteInput, boletoSelect].forEach((input) => {
+          input.addEventListener('input', () => updateOrderButtonState(order.oc));
+        });
+
+        return wrapper;
+      }
+
+      function applyNotProvidedState(input, checkbox, value) {
+        const isNotProvided = normalizeText(value) === 'NAO VEIO';
+        checkbox.checked = isNotProvided;
+        input.disabled = isNotProvided;
+        if (isNotProvided) {
+          input.value = 'não veio';
+        }
+      }
+
+      function toggleNaoVeio(input, checkbox) {
+        if (checkbox.checked) {
+          input.value = 'não veio';
+          input.disabled = true;
+          return;
+        }
+
+        input.disabled = false;
+        if (normalizeText(input.value) === 'NAO VEIO') {
+          input.value = '';
+        }
+      }
+
+      function normalizeBoletoValue(value) {
+        const normalized = normalizeText(value);
+        if (normalized === 'VEIO') {
+          return 'VEIO';
+        }
+        if (normalized === 'NAO VEIO') {
+          return 'NÃO VEIO';
+        }
+        return '';
+      }
+
+      function persistNfFields(oc) {
+        const card = getCardByOc(oc);
+        if (!card) {
+          return;
+        }
+
+        const nf = (card.querySelector('.js-nf-input').value || '').trim();
+        const nfFrete = (card.querySelector('.js-nf-frete-input').value || '').trim();
+        const boleto = card.querySelector('.js-boleto-select').value;
+
+        runServerCall(oc, (runner) => runner.updateOrderHeaderFields(oc, nf, nfFrete, boleto), {
+          success: () => {
+            updateCacheField(oc, 'nf', nf);
+            updateCacheField(oc, 'nfFrete', nfFrete);
+            updateCacheField(oc, 'boleto', boleto);
+            updateOrderButtonState(oc);
+          },
+          message: 'Falha ao salvar cabeçalho do pedido.'
+        });
+      }
+
+      function persistOrderComment(oc, commentValue) {
+        const comment = String(commentValue || '');
+        runServerCall(oc, (runner) => runner.updateOrderComment(oc, comment), {
+          success: () => updateCacheField(oc, 'comment', comment),
+          message: 'Falha ao salvar comentário.'
+        });
+      }
+
       function buildDetailsTable(order) {
         const wrapper = document.createElement('div');
         const table = document.createElement('table');
@@ -643,18 +813,19 @@
 
           const qtyInput = buildInput('number', item.qtyReceived, 'Quantidade recebida');
           const validityInput = buildInput('text', item.validity, 'Validade dd/MM/yyyy');
-          const labelInput = buildInput('number', item.labels, 'Etiquetas');
-          validityInput.addEventListener('blur', () => { validityInput.value = normalizeBrDateInput(validityInput.value) || validityInput.value; saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex); });
-          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
-          labelInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelInput, item.rowIndex));
+          const labelsInput = buildInput('number', item.labels, 'Etiquetas');
 
-          [qtyInput, validityInput, labelInput].forEach((el) => {
-            el.addEventListener('input', () => updateOrderButtonState(order.oc));
+          qtyInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelsInput, item.rowIndex));
+          validityInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelsInput, item.rowIndex));
+          labelsInput.addEventListener('blur', () => saveItem(order.oc, item.lineNo, qtyInput, validityInput, labelsInput, item.rowIndex));
+
+          [qtyInput, validityInput, labelsInput].forEach((input) => {
+            input.addEventListener('input', () => updateOrderButtonState(order.oc));
           });
 
           row.appendChild(wrapCell(qtyInput));
           row.appendChild(wrapCell(validityInput));
-          row.appendChild(wrapCell(labelInput));
+          row.appendChild(wrapCell(labelsInput));
           body.appendChild(row);
         });
         table.appendChild(body);
@@ -666,15 +837,29 @@
         const validityValue = normalizeBrDateInput(validityInput.value);
         const labelsValue = parseNumber(labelInput.value);
 
-        if (!isPositiveNumber(qtyValue)) return showScopedError(oc, 'Quantidade recebida deve ser maior que zero.');
-        if (!validityValue) return showScopedError(oc, 'Validade inválida. Use dd/MM/aaaa.');
-        if (!isPositiveInteger(labelsValue)) return showScopedError(oc, 'Etiquetas deve ser um inteiro positivo.');
+        if (!isPositiveNumber(qtyValue)) {
+          showScopedError(oc, 'Quantidade recebida deve ser maior que zero.');
+          return;
+        }
+        if (!validityValue) {
+          showScopedError(oc, 'Validade inválida. Use dd/MM/aaaa.');
+          return;
+        }
+        if (!isPositiveInteger(labelsValue)) {
+          showScopedError(oc, 'Etiquetas deve ser um inteiro positivo.');
+          return;
+        }
 
         validityInput.value = validityValue;
 
         runServerCall(oc, (runner) => runner.updateItemFields(oc, lineNo, qtyValue, validityValue, labelsValue, rowIndex), {
           success: () => {
-            updateItemCache(oc, lineNo, { qtyReceived: qtyValue, validity: validityValue, labels: labelsValue, rowIndex });
+            updateItemCache(oc, lineNo, {
+              qtyReceived: qtyValue,
+              validity: validityValue,
+              labels: labelsValue,
+              rowIndex,
+            });
             updateOrderButtonState(oc);
           },
           message: 'Falha ao salvar item.'
@@ -697,17 +882,19 @@
 
       function updateOrderButtonState(oc) {
         const card = getCardByOc(oc);
-        if (!card) return;
+        if (!card) {
+          return;
+        }
 
-        const btn = card.querySelector('.js-receive-btn');
-        if (!btn || btn.dataset.locked === 'true') return;
+        const button = card.querySelector('.js-receive-btn');
+        if (!button || button.dataset.locked === 'true') {
+          return;
+        }
 
-        const isProcessing = processingOrders.has(String(oc));
-        btn.disabled = isProcessing || !isOrderComplete(getOrderStateFromCard(card));
+        button.disabled = processingOrders.has(String(oc)) || !isOrderComplete(getOrderStateFromCard(card));
       }
 
       function getOrderStateFromCard(card) {
-        const oc = card.dataset.oc;
         const rows = [...card.querySelectorAll('.items-table tbody tr')];
         const items = rows.map((row) => {
           const fields = row.querySelectorAll('input');
@@ -719,7 +906,6 @@
         });
 
         return {
-          oc,
           nf: (card.querySelector('.js-nf-input').value || '').trim(),
           nfFrete: (card.querySelector('.js-nf-frete-input').value || '').trim(),
           boleto: card.querySelector('.js-boleto-select').value,
@@ -734,14 +920,15 @@
             && !!normalizeBrDateInput(item.validity)
             && isPositiveInteger(item.labels);
         });
+
         return headerOk && itemsOk;
       }
 
       function handleReceived(oc) {
-        const order = getOrderByOc(oc);
         const card = getCardByOc(oc);
-        if (!order || !card) return;
-        if (processingOrders.has(String(oc))) return;
+        if (!card || processingOrders.has(String(oc))) {
+          return;
+        }
 
         clearScopedError(oc);
 
@@ -752,9 +939,9 @@
           return;
         }
 
-        const state = getOrderStateFromCard(card);
-        if (!isOrderComplete(state)) {
-          showScopedError(oc, 'Preencha todos os campos obrigatórios do cabeçalho e dos itens.');
+        const orderState = getOrderStateFromCard(card);
+        if (!isOrderComplete(orderState)) {
+          showScopedError(oc, 'Preencha cabeçalho e itens obrigatórios para concluir o recebimento.');
           return;
         }
 
@@ -768,20 +955,21 @@
         runServerCall(oc, (runner) => runner.receiveOrder(oc, labelWidth, labelHeight), {
           success: (response) => {
             processingOrders.delete(String(oc));
+
             if (button) {
               button.textContent = 'Recebido';
               button.dataset.locked = 'true';
             }
 
-            updateCacheField(oc, 'status', response && response.status ? response.status : 'RECEBIDO');
+            updateCacheField(oc, 'status', (response && response.status) || 'RECEBIDO');
             updateCacheField(oc, 'receivedAt', new Date().toISOString());
             renderFilteredOrders();
 
-            const fileId = response && response.pdfFileId ? response.pdfFileId : '';
-            const printUrl = buildPrintUrl(fileId);
+            const printUrl = buildPrintUrl(response && response.pdfFileId ? response.pdfFileId : '');
             if (printUrl) {
               window.open(printUrl, '_blank', 'noopener');
             }
+
             openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
           },
           failure: () => {
@@ -796,11 +984,13 @@
       }
 
       function handleCancel(oc) {
-        if (!confirm('Tem certeza que deseja cancelar este pedido?')) return;
+        if (!confirm('Tem certeza que deseja cancelar este pedido?')) {
+          return;
+        }
 
         runServerCall(oc, (runner) => runner.cancelOrderStub(oc), {
           success: (response) => {
-            updateCacheField(oc, 'status', response && response.status ? response.status : 'CANCEL_PENDENTE');
+            updateCacheField(oc, 'status', (response && response.status) || 'CANCEL_PENDENTE');
             renderFilteredOrders();
           },
           message: 'Falha ao cancelar pedido.'
@@ -817,21 +1007,29 @@
 
       function updateCacheField(oc, field, value) {
         const order = getOrderByOc(oc);
-        if (!order) return;
+        if (!order) {
+          return;
+        }
         order[field] = value;
       }
 
       function updateItemCache(oc, lineNo, values) {
         const order = getOrderByOc(oc);
-        if (!order) return;
-        const item = (order.items || []).find((row) => Number(row.lineNo) === Number(lineNo));
-        if (!item) return;
+        if (!order) {
+          return;
+        }
+        const item = (order.items || []).find((entry) => Number(entry.lineNo) === Number(lineNo));
+        if (!item) {
+          return;
+        }
         Object.assign(item, values);
       }
 
       function renderDetailsList(list) {
-        if (!list || !list.length) return '<span class="muted">Sem detalhes</span>';
-        return `<ul>${list.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
+        if (!list || !list.length) {
+          return '<span class="muted">Sem detalhes</span>';
+        }
+        return `<ul>${list.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}</ul>`;
       }
 
       function parseNumber(value) {
@@ -850,20 +1048,29 @@
       }
 
       function normalizeBrDateInput(value) {
-        if (!value) return '';
+        if (!value) {
+          return '';
+        }
+
         const clean = String(value).trim().replace(/[-.]/g, '/');
         const parts = clean.split('/');
-        if (parts.length !== 3) return '';
+        if (parts.length !== 3) {
+          return '';
+        }
 
-        const d = Number(parts[0]);
-        const m = Number(parts[1]);
-        const y = Number(parts[2]);
-        if (!Number.isInteger(d) || !Number.isInteger(m) || !Number.isInteger(y)) return '';
+        const day = Number(parts[0]);
+        const month = Number(parts[1]);
+        const year = Number(parts[2]);
+        if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) {
+          return '';
+        }
 
-        const date = new Date(y, m - 1, d);
-        if (date.getFullYear() !== y || date.getMonth() !== (m - 1) || date.getDate() !== d) return '';
+        const date = new Date(year, month - 1, day);
+        if (date.getFullYear() !== year || date.getMonth() !== (month - 1) || date.getDate() !== day) {
+          return '';
+        }
 
-        return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${String(y).padStart(4, '0')}`;
+        return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${String(year).padStart(4, '0')}`;
       }
 
       function openLabelsModal(url) {
@@ -876,13 +1083,18 @@
       }
 
       function buildPrintUrl(fileId) {
-        if (!fileId) return '';
+        if (!fileId) {
+          return '';
+        }
         const base = window.location.href.split('?')[0];
         return `${base}?view=print&fileId=${encodeURIComponent(fileId)}`;
       }
 
       function formatCurrency(value) {
-        return Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return Number(value || 0).toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
       }
 
       function formatNumber(value) {
@@ -896,7 +1108,13 @@
       }
 
       function escapeHtml(value) {
-        return String(value || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char));
+        return String(value || '').replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        }[char] || char));
       }
 
       function cssEscape(value) {
