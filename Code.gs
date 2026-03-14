@@ -105,11 +105,55 @@ function getSupplierOptions() {
 
 function getNamedRangeFirstColumnValues_(spreadsheet, rangeName) {
   const range = getNamedRange_(spreadsheet, rangeName);
-  const values = range.getValues();
-  return values
+  const values = range.offset(0, 0, range.getNumRows(), 1).getDisplayValues();
+
+  const result = values
     .map((row) => row[0])
     .filter((value) => value !== null && value !== undefined && String(value).trim() !== '')
     .map((value) => String(value).trim());
+
+  Logger.log(JSON.stringify({
+    fn: 'getNamedRangeFirstColumnValues_',
+    rangeName,
+    a1: range.getA1Notation(),
+    sheet: range.getSheet().getName(),
+    numRows: range.getNumRows(),
+    numCols: range.getNumColumns(),
+    resultCount: result.length,
+    sample: result.slice(0, 10),
+  }));
+
+  return result;
+}
+
+function debugDropdownSources() {
+  const ss = getSpreadsheet_();
+  const empCompRange = getNamedRange_(ss, 'EMP_COMP');
+  const empFornRange = getNamedRange_(ss, 'EMP_FORN');
+
+  const buyers = getNamedRangeFirstColumnValues_(ss, 'EMP_COMP');
+  const suppliers = getNamedRangeFirstColumnValues_(ss, 'EMP_FORN');
+
+  return {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    empComp: {
+      a1: empCompRange.getA1Notation(),
+      sheet: empCompRange.getSheet().getName(),
+      rows: empCompRange.getNumRows(),
+      cols: empCompRange.getNumColumns(),
+      count: buyers.length,
+      sample: buyers.slice(0, 10),
+    },
+    empForn: {
+      a1: empFornRange.getA1Notation(),
+      sheet: empFornRange.getSheet().getName(),
+      rows: empFornRange.getNumRows(),
+      cols: empFornRange.getNumColumns(),
+      count: suppliers.length,
+      sample: suppliers.slice(0, 10),
+    },
+  };
 }
 
 function updateOrderHeaderFields(oc, nfValue, nfFreteValue, boletoValue) {

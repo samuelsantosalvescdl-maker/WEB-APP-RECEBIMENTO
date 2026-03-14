@@ -117,13 +117,26 @@
       }
 
       function loadFilterOptions() {
+        runServerCall('global', (runner) => runner.debugDropdownSources(), {
+          success: (debug) => {
+            console.log('debugDropdownSources', debug);
+          },
+          message: 'Falha ao diagnosticar fontes dos dropdowns.'
+        });
+
         runServerCall('global', (runner) => runner.getBuyerOptions(), {
-          success: (options) => populateSelect(buyerFilter, options),
+          success: (options) => {
+            console.log('getBuyerOptions retorno:', options);
+            populateSelect(buyerFilter, Array.isArray(options) ? options : []);
+          },
           message: 'Falha ao carregar empresas compradoras.'
         });
 
         runServerCall('global', (runner) => runner.getSupplierOptions(), {
-          success: (options) => populateSelect(supplierFilter, options),
+          success: (options) => {
+            console.log('getSupplierOptions retorno:', options);
+            populateSelect(supplierFilter, Array.isArray(options) ? options : []);
+          },
           message: 'Falha ao carregar fornecedores.'
         });
       }
@@ -182,9 +195,8 @@
       }
 
       function populateSelect(select, options) {
-        const placeholder = createOption_('', 'Selecione...');
         select.innerHTML = '';
-        select.appendChild(placeholder);
+        select.appendChild(createOption_('', 'Selecione...'));
         (options || []).forEach((value) => {
           select.appendChild(createOption_(value, value));
         });
@@ -653,6 +665,135 @@
             updateOrderButtonState(oc);
           },
           message: 'Falha ao salvar os campos de cabeçalho.'
+        });
+      }
+
+      function persistOrderComment(oc, commentValue) {
+        const comment = String(commentValue || '');
+        runServerCall(oc, (runner) => runner.updateOrderComment(oc, comment), {
+          success: () => updateCacheField(oc, 'comment', comment),
+          message: 'Falha ao salvar comentário.'
+        });
+      }
+
+      function buildHeaderFields(order) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'header-fields';
+        wrapper.innerHTML = `
+          <div class="header-fields-grid">
+            <div class="header-field">
+              <label>NF</label>
+              <input type="text" class="js-nf-input" value="${escapeHtml(order.nf || '')}" placeholder="Número NF">
+              <label class="inline-check"><input type="checkbox" class="js-nf-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>NF Frete</label>
+              <input type="text" class="js-nf-frete-input" value="${escapeHtml(order.nfFrete || '')}" placeholder="Número NF Frete">
+              <label class="inline-check"><input type="checkbox" class="js-nf-frete-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>Boleto</label>
+              <select class="js-boleto-select">
+                <option value="">Selecione...</option>
+                <option value="VEIO">VEIO</option>
+                <option value="NÃO VEIO">NÃO VEIO</option>
+              </select>
+            </div>
+            <div class="header-field" style="flex:1 1 280px;">
+              <label>Observação / comentário</label>
+              <textarea class="js-comment-input" placeholder="Comentário do pedido">${escapeHtml(order.comment || '')}</textarea>
+            </div>
+          </div>
+        `;
+
+        const nfInput = wrapper.querySelector('.js-nf-input');
+        const nfFreteInput = wrapper.querySelector('.js-nf-frete-input');
+        const boletoSelect = wrapper.querySelector('.js-boleto-select');
+        const commentInput = wrapper.querySelector('.js-comment-input');
+        const nfNaoVeio = wrapper.querySelector('.js-nf-nao-veio');
+        const nfFreteNaoVeio = wrapper.querySelector('.js-nf-frete-nao-veio');
+
+        boletoSelect.value = normalizeBoletoValue(order.boleto);
+        applyNotProvidedState(nfInput, nfNaoVeio, order.nf);
+        applyNotProvidedState(nfFreteInput, nfFreteNaoVeio, order.nfFrete);
+
+        nfInput.addEventListener('blur', () => persistNfFields(order.oc));
+        nfFreteInput.addEventListener('blur', () => persistNfFields(order.oc));
+        boletoSelect.addEventListener('change', () => persistNfFields(order.oc));
+
+        nfNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfInput, nfNaoVeio);
+          persistNfFields(order.oc);
+          updateOrderButtonState(order.oc);
+        });
+
+        nfFreteNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfFreteInput, nfFreteNaoVeio);
+          persistNfFields(order.oc);
+          updateOrderButtonState(order.oc);
+        });
+
+        commentInput.addEventListener('blur', () => persistOrderComment(order.oc, commentInput.value));
+        commentInput.addEventListener('input', () => updateCacheField(order.oc, 'comment', commentInput.value));
+
+        [nfInput, nfFreteInput, boletoSelect].forEach((input) => {
+          input.addEventListener('input', () => updateOrderButtonState(order.oc));
+        });
+
+        return wrapper;
+      }
+
+      function applyNotProvidedState(input, checkbox, value) {
+        const isNotProvided = normalizeText(value) === 'NAO VEIO';
+        checkbox.checked = isNotProvided;
+        input.disabled = isNotProvided;
+        if (isNotProvided) {
+          input.value = 'não veio';
+        }
+      }
+
+      function toggleNaoVeio(input, checkbox) {
+        if (checkbox.checked) {
+          input.value = 'não veio';
+          input.disabled = true;
+          return;
+        }
+
+        input.disabled = false;
+        if (normalizeText(input.value) === 'NAO VEIO') {
+          input.value = '';
+        }
+      }
+
+      function normalizeBoletoValue(value) {
+        const normalized = normalizeText(value);
+        if (normalized === 'VEIO') {
+          return 'VEIO';
+        }
+        if (normalized === 'NAO VEIO') {
+          return 'NÃO VEIO';
+        }
+        return '';
+      }
+
+      function persistNfFields(oc) {
+        const card = getCardByOc(oc);
+        if (!card) {
+          return;
+        }
+
+        const nf = (card.querySelector('.js-nf-input').value || '').trim();
+        const nfFrete = (card.querySelector('.js-nf-frete-input').value || '').trim();
+        const boleto = card.querySelector('.js-boleto-select').value;
+
+        runServerCall(oc, (runner) => runner.updateOrderHeaderFields(oc, nf, nfFrete, boleto), {
+          success: () => {
+            updateCacheField(oc, 'nf', nf);
+            updateCacheField(oc, 'nfFrete', nfFrete);
+            updateCacheField(oc, 'boleto', boleto);
+            updateOrderButtonState(oc);
+          },
+          message: 'Falha ao salvar cabeçalho do pedido.'
         });
       }
 
