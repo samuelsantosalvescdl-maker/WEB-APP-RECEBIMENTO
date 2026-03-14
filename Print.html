@@ -5,37 +5,13 @@
     <meta charset="UTF-8">
     <title>Impressão de Etiquetas</title>
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 24px;
-      }
-      .actions {
-        margin-top: 16px;
-      }
-      .btn {
-        border: none;
-        padding: 8px 16px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-        margin-right: 8px;
-      }
-      .btn-primary {
-        background: #2b6cb0;
-        color: #fff;
-      }
-      .btn-secondary {
-        background: #e2e8f0;
-        color: #1a202c;
-      }
-      .hidden {
-        display: none;
-      }
-      iframe {
-        width: 0;
-        height: 0;
-        border: 0;
-      }
+      body { font-family: Arial, sans-serif; margin: 24px; }
+      .actions { margin-top: 16px; display: flex; gap: 8px; }
+      .btn { border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; text-decoration: none; }
+      .btn-primary { background: #2b6cb0; color: #fff; }
+      .btn-secondary { background: #e2e8f0; color: #1a202c; }
+      iframe { width: 100%; height: 75vh; border: 1px solid #cbd5e0; border-radius: 6px; margin-top: 12px; }
+      .status-error { color: #c53030; }
     </style>
   </head>
   <body>
@@ -45,14 +21,12 @@
       <button id="printBtn" class="btn btn-primary" type="button">Imprimir</button>
       <a id="openPdf" class="btn btn-secondary" href="#" target="_blank" rel="noopener">Abrir PDF</a>
     </div>
-    <iframe id="pdfFrame" class="hidden"></iframe>
+    <iframe id="pdfFrame"></iframe>
 
     <script>
       function getParams() {
         const params = new URLSearchParams(window.location.search);
-        return {
-          fileId: params.get('fileId') || '',
-        };
+        return { fileId: params.get('fileId') || '' };
       }
 
       const { fileId } = getParams();
@@ -63,29 +37,29 @@
 
       if (!fileId) {
         statusEl.textContent = 'PDF não informado.';
+        statusEl.className = 'status-error';
         printBtn.disabled = true;
+        openPdf.style.pointerEvents = 'none';
+        openPdf.style.opacity = '0.5';
       } else {
         const pdfUrl = `${window.location.origin}${window.location.pathname}?view=pdf&fileId=${encodeURIComponent(fileId)}`;
         openPdf.href = pdfUrl;
         pdfFrame.src = pdfUrl;
 
         pdfFrame.addEventListener('load', () => {
-          statusEl.textContent = 'PDF carregado. Tentando imprimir...';
-          setTimeout(() => {
-            try {
-              pdfFrame.contentWindow.focus();
-              pdfFrame.contentWindow.print();
-            } catch (error) {
-              // fallback manual
-            }
-          }, 300);
+          statusEl.textContent = 'PDF carregado. Clique em "Imprimir" para enviar à impressora.';
+          statusEl.className = '';
+        });
+
+        pdfFrame.addEventListener('error', () => {
+          statusEl.textContent = 'Não foi possível carregar o PDF.';
+          statusEl.className = 'status-error';
         });
       }
 
       printBtn.addEventListener('click', () => {
-        if (!fileId) {
-          return;
-        }
+        if (!fileId) return;
+
         try {
           pdfFrame.contentWindow.focus();
           pdfFrame.contentWindow.print();

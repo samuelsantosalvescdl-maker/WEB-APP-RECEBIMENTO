@@ -13,12 +13,12 @@ const ORDER_RANGE_MAP = {
   status: 6, // G
   buyerDetailsJson: 8, // I
   supplierDetailsJson: 9, // J
-  sentAt: 15, // P
   nf: 10, // K
   nfFrete: 11, // L
   comment: 12, // M
   groupOcs: 13, // N
   groupSentAts: 14, // O
+  sentAt: 15, // P
   boleto: 17, // R
 };
 
@@ -44,33 +44,34 @@ const SPREADSHEET_ID = '1mc3nNSeW6GI2rXudQ30c2bzIlDtccheEdsTG85n_Y4g';
 const LABELS_FOLDER_ID = '1UzyIn1fsiVIatfgQQK-GyGIeJI4Z-AFs';
 const LAST_LABELS_PDF_PROPERTY = 'LAST_LABELS_PDF_FILE_ID';
 
-
 function doGet(e) {
   const view = e && e.parameter && e.parameter.view;
   if (view === 'print') {
-    return HtmlService.createHtmlOutputFromFile('Print')
-      .setTitle('Impressão de Etiquetas');
+    return HtmlService.createHtmlOutputFromFile('Print').setTitle('Impressão de Etiquetas');
   }
+
   if (view === 'pdf') {
     const fileId = e && e.parameter && e.parameter.fileId;
     if (!fileId) {
       return HtmlService.createHtmlOutput('<p>Arquivo não informado.</p>');
     }
+
     try {
       const file = DriveApp.getFileById(fileId);
       const base64 = Utilities.base64Encode(file.getBlob().getBytes());
-      const dataUrl = 'data:application/pdf;base64,' + base64;
+      // Mantém resposta simples via data URL; para PDFs muito grandes pode haver limitação no navegador.
+      const dataUrl = `data:application/pdf;base64,${base64}`;
       const safeDataUrl = dataUrl.replace(/"/g, '&quot;');
       const html = '<!doctype html><html><head><meta charset="utf-8"><title>PDF</title>'
         + '<style>html,body{margin:0;height:100%;}embed{width:100%;height:100%;}</style></head>'
-        + '<body><embed src="' + safeDataUrl + '" type="application/pdf"></body></html>';
+        + `<body><embed src="${safeDataUrl}" type="application/pdf"></body></html>`;
       return HtmlService.createHtmlOutput(html).setTitle('PDF');
     } catch (error) {
       return HtmlService.createHtmlOutput('<p>PDF não encontrado.</p>');
     }
   }
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('Recebimento de Pedidos');
+
+  return HtmlService.createHtmlOutputFromFile('Index').setTitle('Recebimento de Pedidos');
 }
 
 function getOrdersWithItems() {
@@ -88,25 +89,139 @@ function getOrdersWithItems() {
   });
 
   return enriched.sort((a, b) => {
-    const dateA = a.sentAt ? new Date(a.sentAt).getTime() : 0;
-    const dateB = b.sentAt ? new Date(b.sentAt).getTime() : 0;
+    const dateA = new Date(a.sentAt || 0).getTime() || 0;
+    const dateB = new Date(b.sentAt || 0).getTime() || 0;
     return dateB - dateA;
   });
 }
 
 function getBuyerOptions() {
-  const spreadsheet = getSpreadsheet_();
-  return getNamedRangeOptions_(spreadsheet, 'EMP_COMP');
+  return getNamedRangeFirstColumnValues_(getSpreadsheet_(), 'EMP_COMP');
 }
 
 function getSupplierOptions() {
+  return getNamedRangeFirstColumnValues_(getSpreadsheet_(), 'EMP_FORN');
+}
+
+function getNamedRangeFirstColumnValues_(spreadsheet, rangeName) {
+  const range = getNamedRange_(spreadsheet, rangeName);
+  const values = range.offset(0, 0, range.getNumRows(), 1).getDisplayValues();
+
+  const result = values
+    .map((row) => row[0])
+    .filter((value) => value !== null && value !== undefined && String(value).trim() !== '')
+    .map((value) => String(value).trim());
+
+  Logger.log(JSON.stringify({
+    fn: 'getNamedRangeFirstColumnValues_',
+    rangeName,
+    a1: range.getA1Notation(),
+    sheet: range.getSheet().getName(),
+    numRows: range.getNumRows(),
+    numCols: range.getNumColumns(),
+    resultCount: result.length,
+    sample: result.slice(0, 10),
+  }));
+
+  return result;
+}
+
+function debugDropdownSources() {
+  const ss = getSpreadsheet_();
+  const empCompRange = getNamedRange_(ss, 'EMP_COMP');
+  const empFornRange = getNamedRange_(ss, 'EMP_FORN');
+
+  const buyers = getNamedRangeFirstColumnValues_(ss, 'EMP_COMP');
+  const suppliers = getNamedRangeFirstColumnValues_(ss, 'EMP_FORN');
+
+  return {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    empComp: {
+      a1: empCompRange.getA1Notation(),
+      sheet: empCompRange.getSheet().getName(),
+      rows: empCompRange.getNumRows(),
+      cols: empCompRange.getNumColumns(),
+      count: buyers.length,
+      sample: buyers.slice(0, 10),
+    },
+    empForn: {
+      a1: empFornRange.getA1Notation(),
+      sheet: empFornRange.getSheet().getName(),
+      rows: empFornRange.getNumRows(),
+      cols: empFornRange.getNumColumns(),
+      count: suppliers.length,
+      sample: suppliers.slice(0, 10),
+    },
+  };
+}
+
+function updateOrderHeaderFields(oc, nfValue, nfFreteValue, boletoValue) {
+  if (!oc) {
+    throw new Error('OC inválida.');
+  }
+
   const spreadsheet = getSpreadsheet_();
-  return getNamedRangeOptions_(spreadsheet, 'EMP_FORN');
+  const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+  const row = findOrderRowByOcInRange_(ordersRange, oc);
+  if (!row) {
+    throw new Error('Pedido não encontrado.');
+  }
+
+  const nf = sanitizeText_(nfValue);
+  const nfFrete = sanitizeText_(nfFreteValue);
+  const boleto = normalizeBoletoValue_(boletoValue);
+
+  const sheet = ordersRange.getSheet();
+  const startCol = ordersRange.getColumn();
+  sheet.getRange(row, startCol + ORDER_RANGE_MAP.nf).setValue(nf);
+  sheet.getRange(row, startCol + ORDER_RANGE_MAP.nfFrete).setValue(nfFrete);
+  sheet.getRange(row, startCol + ORDER_RANGE_MAP.boleto).setValue(boleto);
+
+  return { ok: true };
+}
+
+function updateOrderComment(oc, commentText) {
+  return updateOrderCommentField(oc, commentText);
+}
+
+function updateOrderCommentField(oc, commentText) {
+  if (!oc) {
+    throw new Error('OC inválida.');
+  }
+
+  const spreadsheet = getSpreadsheet_();
+  const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
+  const row = findOrderRowByOcInRange_(ordersRange, oc);
+  if (!row) {
+    throw new Error('Pedido não encontrado.');
+  }
+
+  const sheet = ordersRange.getSheet();
+  const startCol = ordersRange.getColumn();
+  sheet.getRange(row, startCol + ORDER_RANGE_MAP.comment).setValue(sanitizeText_(commentText));
+
+  return { ok: true };
 }
 
 function updateItemFields(oc, lineNo, qtyReceived, validity, labels, rowIndex) {
   if (!oc) {
     throw new Error('OC inválida.');
+  }
+
+  const normalizedValidity = normalizeBrDateInput_(validity);
+  if (!normalizedValidity) {
+    throw new Error('Informe uma validade no formato dd/MM/aaaa.');
+  }
+
+  const qty = parseNumber_(qtyReceived);
+  if (!isPositiveNumber_(qty)) {
+    throw new Error('Quantidade recebida deve ser maior que zero.');
+  }
+
+  const labelsValue = parseNumber_(labels);
+  if (!isPositiveInteger_(labelsValue)) {
+    throw new Error('Etiquetas deve ser um inteiro positivo.');
   }
 
   const spreadsheet = getSpreadsheet_();
@@ -116,11 +231,11 @@ function updateItemFields(oc, lineNo, qtyReceived, validity, labels, rowIndex) {
     throw new Error('Item não encontrado.');
   }
 
-  const startCol = itemsRange.getColumn();
   const sheet = itemsRange.getSheet();
-  sheet.getRange(row, startCol + ITEM_RANGE_MAP.qtyReceived, 1, 1).setValue(qtyReceived);
-  sheet.getRange(row, startCol + ITEM_RANGE_MAP.validity, 1, 1).setValue(validity);
-  sheet.getRange(row, startCol + ITEM_RANGE_MAP.labels, 1, 1).setValue(labels);
+  const startCol = itemsRange.getColumn();
+  sheet.getRange(row, startCol + ITEM_RANGE_MAP.qtyReceived).setValue(qty);
+  sheet.getRange(row, startCol + ITEM_RANGE_MAP.validity).setValue(normalizedValidity);
+  sheet.getRange(row, startCol + ITEM_RANGE_MAP.labels).setValue(labelsValue);
 
   return { ok: true };
 }
@@ -154,30 +269,29 @@ function receiveOrder(oc, labelWidthCm, labelHeightCm) {
       throw new Error('Pedido não encontrado.');
     }
 
+    validateOrderHeaderForReceive_(order);
+
     const items = readItemsByOcFromRange_(itemsRange)[oc] || [];
     if (!items.length) {
       throw new Error('Itens não encontrados.');
     }
 
-    const invalid = items.some((item) => !isItemCompleteWithLabels_(item));
-    if (invalid) {
-      throw new Error('Preencha validade, etiquetas e quantidade recebida em todas as linhas.');
+    if (items.some((item) => !isItemCompleteWithLabels_(item))) {
+      throw new Error('Preencha quantidade recebida, validade válida e etiquetas em todas as linhas.');
     }
 
     const receivedAt = new Date();
-    const recRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
-    updateReceiptFieldsInRange_(recRange, items, order, receivedAt);
+    updateReceiptFieldsInRange_(itemsRange, items, order, receivedAt);
 
     deleteLastPdf_();
     const pdfResult = generateLabelsPdf_(oc, order, items, width, height);
-
 
     const ordersSheet = ordersRange.getSheet();
     const ordersStartCol = ordersRange.getColumn();
     ordersSheet.getRange(orderRow, ordersStartCol + ORDER_RANGE_MAP.status).setValue('RECEBIDO');
     ordersSheet.getRange(orderRow, ordersStartCol + ORDER_RANGE_MAP.receivedAt).setValue(receivedAt);
 
-    return { ok: true, oc, pdfUrl: pdfResult.pdfUrl, pdfFileId: pdfResult.pdfFileId };
+    return { ok: true, oc, status: 'RECEBIDO', pdfUrl: pdfResult.pdfUrl, pdfFileId: pdfResult.pdfFileId };
   } finally {
     lock.releaseLock();
   }
@@ -192,13 +306,19 @@ function markReceived(oc) {
   const ordersRange = getNamedRange_(spreadsheet, SHEET_NAMES.ORDERS);
   const itemsRange = getNamedRange_(spreadsheet, SHEET_NAMES.ITEMS);
 
+  const order = readOrdersFromRange_(ordersRange).find((entry) => String(entry.oc) === String(oc));
+  if (!order) {
+    throw new Error('Pedido não encontrado.');
+  }
+
+  validateOrderHeaderForReceive_(order);
+
   const items = readItemsByOcFromRange_(itemsRange)[oc] || [];
   if (!items.length) {
     throw new Error('Itens não encontrados.');
   }
 
-  const incomplete = items.some((item) => !isItemComplete_(item));
-  if (incomplete) {
+  if (items.some((item) => !isItemCompleteWithLabels_(item))) {
     throw new Error('Preencha todos os campos obrigatórios antes de receber.');
   }
 
@@ -212,7 +332,7 @@ function markReceived(oc) {
   ordersSheet.getRange(row, ordersStartCol + ORDER_RANGE_MAP.status).setValue('RECEBIDO');
   ordersSheet.getRange(row, ordersStartCol + ORDER_RANGE_MAP.receivedAt).setValue(new Date());
 
-  return { ok: true };
+  return { ok: true, status: 'RECEBIDO' };
 }
 
 function cancelOrderStub(oc) {
@@ -229,14 +349,17 @@ function cancelOrderStub(oc) {
 
   const ordersSheet = ordersRange.getSheet();
   const ordersStartCol = ordersRange.getColumn();
-  ordersSheet.getRange(row, ordersStartCol + ORDER_RANGE_MAP.status).setValue('CANCEL_PENDENTE');
-  return { ok: true };
+  const status = 'CANCEL_PENDENTE';
+  ordersSheet.getRange(row, ordersStartCol + ORDER_RANGE_MAP.status).setValue(status);
+
+  return { ok: true, oc, status };
 }
 
 function getSpreadsheet_() {
   if (!SPREADSHEET_ID || SPREADSHEET_ID === 'YOUR_SPREADSHEET_ID_HERE') {
     throw new Error('SPREADSHEET_ID não configurado.');
   }
+
   try {
     return SpreadsheetApp.openById(SPREADSHEET_ID);
   } catch (error) {
@@ -247,18 +370,10 @@ function getSpreadsheet_() {
 function getNamedRange_(spreadsheet, rangeName) {
   const range = spreadsheet.getRangeByName(rangeName);
   if (!range) {
-    throw new Error('Named range não encontrado: ' + rangeName);
+    throw new Error(`Named range não encontrado: ${rangeName}`);
   }
   return range;
 }
-
-function getNamedRangeOptions_(spreadsheet, rangeName) {
-  const range = getNamedRange_(spreadsheet, rangeName);
-  const values = range.getValues();
-  const options = values.map((row) => row[0]).filter((value) => value !== null && value !== '');
-  return options.map((value) => String(value));
-}
-
 
 function deleteLastPdf_() {
   const props = PropertiesService.getScriptProperties();
@@ -266,12 +381,13 @@ function deleteLastPdf_() {
   if (!lastId) {
     return;
   }
+
   try {
-    const file = DriveApp.getFileById(lastId);
-    file.setTrashed(true);
+    DriveApp.getFileById(lastId).setTrashed(true);
   } catch (error) {
-    // Ignore missing file errors.
+    // Ignora erro de arquivo ausente.
   }
+
   props.deleteProperty(LAST_LABELS_PDF_PROPERTY);
 }
 
@@ -296,15 +412,18 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
   const pageHeight = labelHeightCm;
   const labels = buildLabelsQueue_(order, items);
   const pages = [];
+
   for (let i = 0; i < labels.length; i += 3) {
     const slice = labels.slice(i, i + 3);
     while (slice.length < 3) {
       slice.push(null);
     }
+
     const labelsHtml = slice.map((entry) => {
       if (!entry) {
         return '<div class="label label-empty"></div>';
       }
+
       return `
         <div class="label">
           <div class="label-line"><strong>OC:</strong> ${escapeHtml_(entry.oc)}</div>
@@ -316,11 +435,8 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
         </div>
       `;
     });
-    pages.push(`
-      <div class="page">
-        ${labelsHtml.join('')}
-      </div>
-    `);
+
+    pages.push(`<div class="page">${labelsHtml.join('')}</div>`);
   }
 
   return `
@@ -349,12 +465,8 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
             flex-direction: column;
             justify-content: center;
           }
-          .label-empty {
-            border-color: transparent;
-          }
-          .label-line {
-            line-height: 1.2;
-          }
+          .label-empty { border-color: transparent; }
+          .label-line { line-height: 1.2; }
         </style>
       </head>
       <body>
@@ -362,10 +474,6 @@ function buildPdfHtml_(order, items, labelWidthCm, labelHeightCm) {
       </body>
     </html>
   `;
-}
-
-function formatDateTime_(value) {
-  return Utilities.formatDate(value, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
 }
 
 function buildLabelsQueue_(order, items) {
@@ -385,9 +493,6 @@ function buildLabelsQueue_(order, items) {
   });
   return queue;
 }
-
-
-
 
 function findOrderRowByOcInRange_(range, oc) {
   const values = range.getValues();
@@ -429,6 +534,12 @@ function readOrdersFromRange_(range) {
       buyerDetails: parseJsonSafe_(row[ORDER_RANGE_MAP.buyerDetailsJson]),
       supplierDetails: parseJsonSafe_(row[ORDER_RANGE_MAP.supplierDetailsJson]),
       receivedAt: formatDateValue_(row[ORDER_RANGE_MAP.receivedAt]),
+      nf: sanitizeText_(row[ORDER_RANGE_MAP.nf]),
+      nfFrete: sanitizeText_(row[ORDER_RANGE_MAP.nfFrete]),
+      comment: sanitizeText_(row[ORDER_RANGE_MAP.comment]),
+      groupOcs: sanitizeText_(row[ORDER_RANGE_MAP.groupOcs]),
+      groupSentAts: sanitizeText_(row[ORDER_RANGE_MAP.groupSentAts]),
+      boleto: sanitizeText_(row[ORDER_RANGE_MAP.boleto]),
     }));
 }
 
@@ -442,6 +553,8 @@ function readItemsByOcFromRange_(range) {
     if (!acc[oc]) {
       acc[oc] = [];
     }
+
+    const normalizedValidity = normalizeBrDateInput_(row[ITEM_RANGE_MAP.validity]);
     acc[oc].push({
       oc,
       lineNo: row[ITEM_RANGE_MAP.lineNo],
@@ -453,7 +566,7 @@ function readItemsByOcFromRange_(range) {
       unitPrice: row[ITEM_RANGE_MAP.unitPrice],
       total: row[ITEM_RANGE_MAP.total] || (row[ITEM_RANGE_MAP.qty] * row[ITEM_RANGE_MAP.unitPrice]),
       qtyReceived: row[ITEM_RANGE_MAP.qtyReceived],
-      validity: formatDateOnly_(row[ITEM_RANGE_MAP.validity]),
+      validity: normalizedValidity || formatDateOnly_(row[ITEM_RANGE_MAP.validity]),
       labels: row[ITEM_RANGE_MAP.labels],
       buyerSelected: row[ITEM_RANGE_MAP.buyerSelected],
       supplierSelected: row[ITEM_RANGE_MAP.supplierSelected],
@@ -464,14 +577,13 @@ function readItemsByOcFromRange_(range) {
   }, {});
 }
 
-
-
 function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
   const sheet = range.getSheet();
   const startCol = range.getColumn();
   const startRow = range.getRow();
   const values = range.getValues();
-  const receivedText = formatDateTime_(receivedAt);
+
+  // Mantém Date real para compatibilidade com filtros/ordenações na planilha.
   values.forEach((row, index) => {
     if (String(row[ITEM_RANGE_MAP.oc]) !== String(order.oc)) {
       return;
@@ -479,31 +591,90 @@ function updateReceiptFieldsInRange_(range, items, order, receivedAt) {
     const rowNumber = startRow + index;
     sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.buyerSelected).setValue(order.buyerSelected || '');
     sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.supplierSelected).setValue(order.supplierSelected || '');
-    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.receivedAt).setValue(receivedText);
+    sheet.getRange(rowNumber, startCol + ITEM_RANGE_MAP.receivedAt).setValue(receivedAt);
   });
 }
 
+function validateOrderHeaderForReceive_(order) {
+  const nf = sanitizeText_(order.nf);
+  const nfFrete = sanitizeText_(order.nfFrete);
+  const boleto = normalizeBoletoValue_(order.boleto);
 
-
-function isItemComplete_(item) {
-  if (item.qtyReceived === '' || item.qtyReceived === null || item.qtyReceived === undefined) {
-    return false;
+  if (!nf) {
+    throw new Error('Preencha NF ou marque como não veio.');
   }
-  const qtyReceived = Number(item.qtyReceived);
-  if (!isNumber_(qtyReceived) || qtyReceived <= 0) {
-    return false;
+  if (!nfFrete) {
+    throw new Error('Preencha NF Frete ou marque como não veio.');
   }
-  if (!item.validity || String(item.validity).trim() === '') {
-    return false;
+  if (!boleto) {
+    throw new Error('Selecione o status do boleto (VEIO ou NÃO VEIO).');
   }
-  if (!item.labels || String(item.labels).trim() === '') {
-    return false;
-  }
-  return true;
 }
 
-function isNumber_(value) {
-  return typeof value === 'number' && !Number.isNaN(value);
+function isItemCompleteWithLabels_(item) {
+  const qtyReceived = parseNumber_(item.qtyReceived);
+  const labels = parseNumber_(item.labels);
+  const normalizedValidity = normalizeBrDateInput_(item.validity);
+  return isPositiveNumber_(qtyReceived)
+    && isPositiveInteger_(labels)
+    && !!normalizedValidity
+    && isValidDateString_(normalizedValidity);
+}
+
+function normalizeBrDateInput_(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  }
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  const clean = String(value).trim();
+  if (!clean) {
+    return '';
+  }
+
+  const normalized = clean.replace(/[-.]/g, '/');
+  const parts = normalized.split('/');
+  if (parts.length !== 3) {
+    return '';
+  }
+
+  const day = Number(parts[0]);
+  const month = Number(parts[1]);
+  const year = Number(parts[2]);
+
+  if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) {
+    return '';
+  }
+
+  const dateText = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${String(year).padStart(4, '0')}`;
+  return isValidBrDateStrict_(dateText) ? dateText : '';
+}
+
+function isValidBrDateStrict_(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) {
+    return false;
+  }
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (year < 1900 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === (month - 1) && date.getDate() === day;
+}
+
+function isValidDateString_(value) {
+  return !!normalizeBrDateInput_(value);
 }
 
 function parseNumber_(value) {
@@ -513,8 +684,7 @@ function parseNumber_(value) {
   if (typeof value === 'number') {
     return value;
   }
-  const normalized = String(value).replace(',', '.');
-  return Number(normalized);
+  return Number(String(value).replace(',', '.'));
 }
 
 function isPositiveNumber_(value) {
@@ -525,23 +695,25 @@ function isPositiveInteger_(value) {
   return Number.isInteger(value) && value > 0;
 }
 
-function isValidDateString_(value) {
-  if (value instanceof Date) {
-    return true;
+function normalizeBoletoValue_(value) {
+  const text = sanitizeText_(value).toUpperCase();
+  if (!text) {
+    return '';
   }
-  if (typeof value !== 'string') {
-    return false;
+  if (text === 'VEIO') {
+    return 'VEIO';
   }
-  const normalized = value.trim().replace(/[-.]/g, '/');
-  return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized);
+  if (text === 'NÃO VEIO' || text === 'NAO VEIO') {
+    return 'NÃO VEIO';
+  }
+  throw new Error('Boleto inválido. Use VEIO ou NÃO VEIO.');
 }
 
-function isItemCompleteWithLabels_(item) {
-  const qtyReceived = parseNumber_(item.qtyReceived);
-  const labels = parseNumber_(item.labels);
-  return isPositiveNumber_(qtyReceived)
-    && isPositiveInteger_(labels)
-    && isValidDateString_(item.validity || '');
+function sanitizeText_(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value).trim();
 }
 
 function escapeHtml_(value) {
@@ -575,15 +747,12 @@ function formatDateValue_(value) {
   if (!value) {
     return '';
   }
-  return value;
+  return String(value);
 }
 
 function formatDateOnly_(value) {
   if (value instanceof Date) {
     return Utilities.formatDate(value, Session.getScriptTimeZone(), 'dd/MM/yyyy');
   }
-  if (!value) {
-    return '';
-  }
-  return String(value);
+  return sanitizeText_(value);
 }
