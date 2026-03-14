@@ -389,6 +389,123 @@
         });
       }
 
+      function buildHeaderFields(order) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'header-fields';
+        wrapper.innerHTML = `
+          <div class="header-fields-grid">
+            <div class="header-field">
+              <label>NF</label>
+              <input type="text" class="js-nf-input" value="${escapeHtml(order.nf || '')}" placeholder="Número NF">
+              <label class="inline-check"><input type="checkbox" class="js-nf-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>NF Frete</label>
+              <input type="text" class="js-nf-frete-input" value="${escapeHtml(order.nfFrete || '')}" placeholder="Número NF Frete">
+              <label class="inline-check"><input type="checkbox" class="js-nf-frete-nao-veio"> Não veio</label>
+            </div>
+            <div class="header-field">
+              <label>Boleto</label>
+              <select class="js-boleto-select">
+                <option value="">Selecione...</option>
+                <option value="VEIO">VEIO</option>
+                <option value="NÃO VEIO">NÃO VEIO</option>
+              </select>
+            </div>
+            <div class="header-field" style="flex:1 1 280px;">
+              <label>Observação / comentário</label>
+              <textarea class="js-comment-input" placeholder="Comentário do pedido">${escapeHtml(order.comment || '')}</textarea>
+            </div>
+          </div>
+        `;
+
+        const nfInput = wrapper.querySelector('.js-nf-input');
+        const nfFreteInput = wrapper.querySelector('.js-nf-frete-input');
+        const boletoSelect = wrapper.querySelector('.js-boleto-select');
+        const commentInput = wrapper.querySelector('.js-comment-input');
+        const nfNaoVeio = wrapper.querySelector('.js-nf-nao-veio');
+        const nfFreteNaoVeio = wrapper.querySelector('.js-nf-frete-nao-veio');
+
+        boletoSelect.value = normalizeBoletoValue(order.boleto);
+        applyNotProvidedState(nfInput, nfNaoVeio, order.nf);
+        applyNotProvidedState(nfFreteInput, nfFreteNaoVeio, order.nfFrete);
+
+        const persistHeader = () => persistNfFields(order.oc);
+
+        nfInput.addEventListener('blur', persistHeader);
+        nfFreteInput.addEventListener('blur', persistHeader);
+        boletoSelect.addEventListener('change', persistHeader);
+
+        nfNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfInput, nfNaoVeio);
+          persistHeader();
+          updateOrderButtonState(order.oc);
+        });
+
+        nfFreteNaoVeio.addEventListener('change', () => {
+          toggleNaoVeio(nfFreteInput, nfFreteNaoVeio);
+          persistHeader();
+          updateOrderButtonState(order.oc);
+        });
+
+        commentInput.addEventListener('blur', () => persistOrderComment(order.oc, commentInput.value));
+        commentInput.addEventListener('input', () => updateCacheField(order.oc, 'comment', commentInput.value));
+
+        [nfInput, nfFreteInput, boletoSelect].forEach((el) => el.addEventListener('input', () => updateOrderButtonState(order.oc)));
+        return wrapper;
+      }
+
+      function applyNotProvidedState(input, checkbox, value) {
+        const marked = normalizeText(value) === 'NAO VEIO';
+        checkbox.checked = marked;
+        input.disabled = marked;
+        if (marked) input.value = 'não veio';
+      }
+
+      function toggleNaoVeio(input, checkbox) {
+        if (checkbox.checked) {
+          input.value = 'não veio';
+          input.disabled = true;
+          return;
+        }
+        input.disabled = false;
+        if (normalizeText(input.value) === 'NAO VEIO') input.value = '';
+      }
+
+      function normalizeBoletoValue(value) {
+        const n = normalizeText(value);
+        if (n === 'VEIO') return 'VEIO';
+        if (n === 'NAO VEIO') return 'NÃO VEIO';
+        return '';
+      }
+
+      function persistNfFields(oc) {
+        const card = getCardByOc(oc);
+        if (!card) return;
+
+        const nfValue = (card.querySelector('.js-nf-input').value || '').trim();
+        const nfFreteValue = (card.querySelector('.js-nf-frete-input').value || '').trim();
+        const boletoValue = card.querySelector('.js-boleto-select').value;
+
+        runServerCall(oc, (runner) => runner.updateOrderHeaderFields(oc, nfValue, nfFreteValue, boletoValue), {
+          success: () => {
+            updateCacheField(oc, 'nf', nfValue);
+            updateCacheField(oc, 'nfFrete', nfFreteValue);
+            updateCacheField(oc, 'boleto', boletoValue);
+            updateOrderButtonState(oc);
+          },
+          message: 'Falha ao salvar os campos de cabeçalho.'
+        });
+      }
+
+      function persistOrderComment(oc, commentValue) {
+        const comment = String(commentValue || '');
+        runServerCall(oc, (runner) => runner.updateOrderComment(oc, comment), {
+          success: () => updateCacheField(oc, 'comment', comment),
+          message: 'Falha ao salvar comentário.'
+        });
+      }
+
       function buildDetailsTable(order) {
         const wrapper = document.createElement('div');
         const table = document.createElement('table');
@@ -637,16 +754,8 @@
         labelsModal.style.display = 'flex';
       }
 
-        google.script.run.withSuccessHandler((response) => {
-          updateCacheField(order.oc, 'status', response.status || 'RECEBIDO');
-          removeOrderCard(order.oc);
-          const fileId = response && response.pdfFileId ? response.pdfFileId : '';
-          const printUrl = buildPrintUrl(fileId);
-          if (printWindow && printUrl) printWindow.location.href = printUrl;
-          openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
-        }).withFailureHandler((error) => {
-          button.disabled = false; button.textContent = 'Recebido'; message.textContent = error.message || 'Falha ao marcar como recebido.'; if (printWindow) printWindow.close();
-        }).receiveOrder(order.oc, labelWidth, labelHeight);
+      function closeLabelsModal() {
+        labelsModal.style.display = 'none';
       }
 
       function buildPrintUrl(fileId) {

@@ -58,6 +58,7 @@ function doGet(e) {
     try {
       const file = DriveApp.getFileById(fileId);
       const base64 = Utilities.base64Encode(file.getBlob().getBytes());
+      // Mantém resposta simples via data URL; para PDFs muito grandes pode haver limitação de tamanho no navegador.
       const dataUrl = `data:application/pdf;base64,${base64}`;
       const safeDataUrl = dataUrl.replace(/"/g, '&quot;');
       const html = '<!doctype html><html><head><meta charset="utf-8"><title>PDF</title>'
@@ -94,11 +95,11 @@ function getOrdersWithItems() {
 }
 
 function getBuyerOptions() {
-  return getNamedRangeOptions_(getSpreadsheet_(), 'EMP_COMP');
+  return getNamedRangeColumnValues_(getSpreadsheet_(), 'EMP_COMP', 'A');
 }
 
 function getSupplierOptions() {
-  return getNamedRangeOptions_(getSpreadsheet_(), 'EMP_FORN');
+  return getNamedRangeColumnValues_(getSpreadsheet_(), 'EMP_FORN', 'B');
 }
 
 function updateOrderHeaderFields(oc, nfValue, nfFreteValue, boletoValue) {
@@ -321,6 +322,40 @@ function getNamedRangeOptions_(spreadsheet, rangeName) {
     .map((row) => row[0])
     .filter((value) => value !== null && value !== '')
     .map((value) => String(value));
+}
+
+function getNamedRangeColumnValues_(spreadsheet, rangeName, absColumnLetter) {
+  const range = getNamedRange_(spreadsheet, rangeName);
+  const values = range.getValues();
+  if (!values.length) {
+    return [];
+  }
+
+  const rangeStartColumn = range.getColumn();
+  const absoluteColumn = colLetterToIndex_(absColumnLetter);
+  const relativeIndex = absoluteColumn - rangeStartColumn;
+
+  if (relativeIndex < 0 || relativeIndex >= range.getNumColumns()) {
+    throw new Error(`A coluna ${absColumnLetter} não está contida no named range ${rangeName}.`);
+  }
+
+  return values
+    .map((row) => row[relativeIndex])
+    .filter((value) => value !== null && value !== undefined && String(value).trim() !== '')
+    .map((value) => String(value).trim());
+}
+
+function colLetterToIndex_(letter) {
+  const text = String(letter || '').trim().toUpperCase();
+  if (!/^[A-Z]+$/.test(text)) {
+    throw new Error(`Coluna inválida: ${letter}`);
+  }
+
+  let index = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    index = (index * 26) + (text.charCodeAt(i) - 64);
+  }
+  return index;
 }
 
 function deleteLastPdf_() {
