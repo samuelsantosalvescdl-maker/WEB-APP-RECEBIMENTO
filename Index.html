@@ -566,6 +566,16 @@
             updateCacheField(oc, 'receivedAt', new Date().toISOString());
             renderFilteredOrders();
 
+            // Mantém uma única declaração de printUrl para evitar erro de parse por redeclaração.
+            const printUrl = buildPrintUrl(response && response.pdfFileId ? response.pdfFileId : '');
+            if (printUrl) {
+              window.open(printUrl, '_blank', 'noopener');
+            }
+
+            updateCacheField(oc, 'status', (response && response.status) || 'RECEBIDO');
+            updateCacheField(oc, 'receivedAt', new Date().toISOString());
+            renderFilteredOrders();
+
             const printUrl = buildPrintUrl(response && response.pdfFileId ? response.pdfFileId : '');
             if (printUrl) {
               window.open(printUrl, '_blank', 'noopener');
