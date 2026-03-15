@@ -112,9 +112,7 @@
         supplierFilter.addEventListener('change', renderFilteredOrders);
         closeModal.addEventListener('click', closeLabelsModal);
         labelsModal.addEventListener('click', (event) => {
-          if (event.target === labelsModal) {
-            closeLabelsModal();
-          }
+          if (event.target === labelsModal) closeLabelsModal();
         });
       }
 
@@ -195,11 +193,12 @@
       }
 
       function createOption_(value, label) {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = label;
-        return option;
+        const o = document.createElement('option');
+        o.value = value;
+        o.textContent = label;
+        return o;
       }
+      function createOption_(value, label) { const o = document.createElement('option'); o.value = value; o.textContent = label; return o; }
 
       function renderFilteredOrders() {
         const buyerValue = buyerFilter.value;
@@ -209,7 +208,6 @@
           renderEmptyState('Selecione a empresa compradora e/ou fornecedor para visualizar pedidos.');
           return;
         }
-
         const filtered = ordersCache
           .filter((order) => order.status !== 'RECEBIDO')
           .filter((order) => matchesFilter(order, buyerValue, supplierValue));
@@ -218,13 +216,9 @@
           renderEmptyState('Nenhum pedido se adequou ao filtro.');
           return;
         }
-
         renderOrders(filtered);
       }
-
-      function renderEmptyState(message) {
-        ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
-      }
+      function renderEmptyState(message) { ordersContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`; }
 
       function renderOrders(orders) {
         ordersContainer.innerHTML = '';
@@ -418,22 +412,8 @@
         const wrapper = document.createElement('div');
         const table = document.createElement('table');
         table.className = 'details-table';
-        table.innerHTML = `
-          <thead>
-            <tr>
-              <th colspan="2">Detalhes do Comprador</th>
-              <th colspan="2">Detalhes do Fornecedor</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td colspan="2">${renderDetailsList(order.buyerDetails)}</td>
-              <td colspan="2">${renderDetailsList(order.supplierDetails)}</td>
-            </tr>
-          </tbody>
-        `;
-        wrapper.appendChild(table);
-        return wrapper;
+        table.innerHTML = `<thead><tr><th colspan="2">Detalhes do Comprador</th><th colspan="2">Detalhes do Fornecedor</th></tr></thead><tbody><tr><td colspan="2">${renderDetailsList(order.buyerDetails)}</td><td colspan="2">${renderDetailsList(order.supplierDetails)}</td></tr></tbody>`;
+        wrapper.appendChild(table); return wrapper;
       }
 
       function buildItemsTable(order) {
@@ -463,7 +443,6 @@
           row.appendChild(wrapCell(labelsInput));
           body.appendChild(row);
         });
-
         table.appendChild(body);
         return table;
       }
@@ -501,9 +480,7 @@
         const input = document.createElement('input');
         input.type = type;
         input.placeholder = placeholder;
-        if (value !== null && value !== undefined) {
-          input.value = value;
-        }
+        if (value !== null && value !== undefined) input.value = value;
         return input;
       }
 
@@ -594,6 +571,25 @@
             if (printUrl) {
               window.open(printUrl, '_blank', 'noopener');
             }
+
+            updateCacheField(oc, 'status', (response && response.status) || 'RECEBIDO');
+            updateCacheField(oc, 'receivedAt', new Date().toISOString());
+            renderFilteredOrders();
+
+            const printUrl = buildPrintUrl(response && response.pdfFileId ? response.pdfFileId : '');
+            if (printUrl) {
+              window.open(printUrl, '_blank', 'noopener');
+            }
+
+            updateCacheField(oc, 'status', (response && response.status) || 'RECEBIDO');
+            updateCacheField(oc, 'receivedAt', new Date().toISOString());
+            renderFilteredOrders();
+
+            const printUrl = buildPrintUrl(response && response.pdfFileId ? response.pdfFileId : '');
+            if (printUrl) {
+              window.open(printUrl, '_blank', 'noopener');
+            }
+
             openLabelsModal(response && response.pdfUrl ? response.pdfUrl : '#');
           },
           failure: () => {
