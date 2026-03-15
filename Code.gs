@@ -107,23 +107,10 @@ function getNamedRangeFirstColumnValues_(spreadsheet, rangeName) {
   const range = getNamedRange_(spreadsheet, rangeName);
   const values = range.offset(0, 0, range.getNumRows(), 1).getDisplayValues();
 
-  const result = values
+  return values
     .map((row) => row[0])
     .filter((value) => value !== null && value !== undefined && String(value).trim() !== '')
     .map((value) => String(value).trim());
-
-  Logger.log(JSON.stringify({
-    fn: 'getNamedRangeFirstColumnValues_',
-    rangeName: rangeName,
-    a1: range.getA1Notation(),
-    sheet: range.getSheet().getName(),
-    numRows: range.getNumRows(),
-    numCols: range.getNumColumns(),
-    resultCount: result.length,
-    sample: result.slice(0, 10)
-  }));
-
-  return result;
 }
 
 function debugDropdownSources() {
