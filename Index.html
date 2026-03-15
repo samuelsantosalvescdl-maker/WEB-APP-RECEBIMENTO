@@ -117,14 +117,25 @@
       }
 
       function loadFilterOptions() {
-        runServerCall('global', (runner) => runner.debugDropdownSources(), {
+        runServerCall('global', (runner) => runner.debugInfraAccess(), {
           success: (debug) => {
-            console.log('debugDropdownSources', debug);
+            console.log('debugInfraAccess', debug);
+            const infraErrors = [];
+            if (!debug || !debug.spreadsheet || debug.spreadsheet.ok !== true) {
+              infraErrors.push('Falha de acesso à planilha configurada.');
+            }
+            if (!debug || !debug.folder || debug.folder.ok !== true) {
+              infraErrors.push('Falha de acesso à pasta das etiquetas.');
+            }
+            if (infraErrors.length) {
+              showScopedError('global', infraErrors.join(' '));
+            }
           },
-          message: 'Falha ao diagnosticar fontes dos dropdowns.'
+          message: 'Falha ao diagnosticar acesso de infraestrutura.'
         });
 
         runServerCall('global', (runner) => runner.getBuyerOptions(), {
+          clear: false,
           success: (options) => {
             console.log('getBuyerOptions retorno:', options);
             populateSelect(buyerFilter, Array.isArray(options) ? options : []);
@@ -133,6 +144,7 @@
         });
 
         runServerCall('global', (runner) => runner.getSupplierOptions(), {
+          clear: false,
           success: (options) => {
             console.log('getSupplierOptions retorno:', options);
             populateSelect(supplierFilter, Array.isArray(options) ? options : []);
@@ -145,7 +157,7 @@
         const success = options.success || (() => {});
         const failure = options.failure || (() => {});
         const fallbackMessage = options.message || 'Erro inesperado.';
-        clearScopedError(scope);
+        if (options.clear !== false) clearScopedError(scope);
 
         const runner = google.script.run
           .withSuccessHandler(success)
@@ -198,7 +210,6 @@
         o.textContent = label;
         return o;
       }
-      function createOption_(value, label) { const o = document.createElement('option'); o.value = value; o.textContent = label; return o; }
 
       function renderFilteredOrders() {
         const buyerValue = buyerFilter.value;
@@ -296,12 +307,14 @@
           <div class="header-fields-grid">
             <div class="header-field">
               <label>NF</label>
-              <input type="text" class="js-nf-input" value="${escapeHtml(order.nf || '')}" placeholder="Número NF">
+              <div class="js-nf-multi"></div>
+              <button type="button" class="btn btn-secondary js-add-nf">+ NF</button>
               <label class="inline-check"><input type="checkbox" class="js-nf-nao-veio"> Não veio</label>
             </div>
             <div class="header-field">
               <label>NF Frete</label>
-              <input type="text" class="js-nf-frete-input" value="${escapeHtml(order.nfFrete || '')}" placeholder="Número NF Frete">
+              <div class="js-nf-frete-multi"></div>
+              <button type="button" class="btn btn-secondary js-add-nf-frete">+ NF Frete</button>
               <label class="inline-check"><input type="checkbox" class="js-nf-frete-nao-veio"> Não veio</label>
             </div>
             <div class="header-field">
@@ -319,29 +332,50 @@
           </div>
         `;
 
-        const nfInput = wrapper.querySelector('.js-nf-input');
-        const nfFreteInput = wrapper.querySelector('.js-nf-frete-input');
+        const nfContainer = wrapper.querySelector('.js-nf-multi');
+        const nfFreteContainer = wrapper.querySelector('.js-nf-frete-multi');
+        const addNfButton = wrapper.querySelector('.js-add-nf');
+        const addNfFreteButton = wrapper.querySelector('.js-add-nf-frete');
         const boletoSelect = wrapper.querySelector('.js-boleto-select');
         const commentInput = wrapper.querySelector('.js-comment-input');
         const nfNaoVeio = wrapper.querySelector('.js-nf-nao-veio');
         const nfFreteNaoVeio = wrapper.querySelector('.js-nf-frete-nao-veio');
 
-        boletoSelect.value = normalizeBoletoValue(order.boleto);
-        applyNotProvidedState(nfInput, nfNaoVeio, order.nf);
-        applyNotProvidedState(nfFreteInput, nfFreteNaoVeio, order.nfFrete);
+        renderMultiField(nfContainer, parseMultiText(order.nf), 'NF');
+        renderMultiField(nfFreteContainer, parseMultiText(order.nfFrete), 'NF Frete');
 
-        nfInput.addEventListener('blur', () => persistNfFields(order.oc));
-        nfFreteInput.addEventListener('blur', () => persistNfFields(order.oc));
+        boletoSelect.value = normalizeBoletoValue(order.boleto);
+        applyNotProvidedState(nfContainer, nfNaoVeio, order.nf, 'NF');
+        applyNotProvidedState(nfFreteContainer, nfFreteNaoVeio, order.nfFrete, 'NF Frete');
+        addNfButton.disabled = nfNaoVeio.checked;
+        addNfFreteButton.disabled = nfFreteNaoVeio.checked;
+
+        addNfButton.addEventListener('click', () => {
+          if (nfNaoVeio.checked) return;
+          appendMultiFieldEntry(nfContainer, '', 'NF');
+        });
+        addNfFreteButton.addEventListener('click', () => {
+          if (nfFreteNaoVeio.checked) return;
+          appendMultiFieldEntry(nfFreteContainer, '', 'NF Frete');
+        });
+
+        nfContainer.addEventListener('input', () => updateOrderButtonState(order.oc));
+        nfFreteContainer.addEventListener('input', () => updateOrderButtonState(order.oc));
+
+        nfContainer.addEventListener('blur', () => persistNfFields(order.oc), true);
+        nfFreteContainer.addEventListener('blur', () => persistNfFields(order.oc), true);
         boletoSelect.addEventListener('change', () => persistNfFields(order.oc));
 
         nfNaoVeio.addEventListener('change', () => {
-          toggleNaoVeio(nfInput, nfNaoVeio);
+          toggleNaoVeio(nfContainer, nfNaoVeio, 'NF');
+          addNfButton.disabled = nfNaoVeio.checked;
           persistNfFields(order.oc);
           updateOrderButtonState(order.oc);
         });
 
         nfFreteNaoVeio.addEventListener('change', () => {
-          toggleNaoVeio(nfFreteInput, nfFreteNaoVeio);
+          toggleNaoVeio(nfFreteContainer, nfFreteNaoVeio, 'NF Frete');
+          addNfFreteButton.disabled = nfFreteNaoVeio.checked;
           persistNfFields(order.oc);
           updateOrderButtonState(order.oc);
         });
@@ -349,29 +383,88 @@
         commentInput.addEventListener('blur', () => persistOrderComment(order.oc, commentInput.value));
         commentInput.addEventListener('input', () => updateCacheField(order.oc, 'comment', commentInput.value));
 
-        [nfInput, nfFreteInput, boletoSelect].forEach((input) => {
-          input.addEventListener('input', () => updateOrderButtonState(order.oc));
-        });
-
         return wrapper;
       }
 
-      function applyNotProvidedState(input, checkbox, value) {
-        const isNotProvided = normalizeText(value) === 'NAO VEIO';
-        checkbox.checked = isNotProvided;
-        input.disabled = isNotProvided;
-        if (isNotProvided) input.value = 'não veio';
+      function parseMultiText(value) {
+        const raw = String(value || '').trim();
+        if (!raw || normalizeText(raw) === 'NAO VEIO') return [];
+        return raw
+          .split(/[;,\n]+/)
+          .map((entry) => String(entry || '').trim())
+          .filter((entry) => entry !== '');
       }
 
-      function toggleNaoVeio(input, checkbox) {
+      function normalizeMultiText(values) {
+        return (values || [])
+          .map((entry) => String(entry || '').trim())
+          .filter((entry) => entry !== '')
+          .join(', ');
+      }
+
+      function appendMultiFieldEntry(container, value, label) {
+        const row = document.createElement('div');
+        row.className = 'group-row';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'js-multi-input';
+        input.placeholder = `${label} ${container.querySelectorAll('.js-multi-input').length + 1}`;
+        input.value = String(value || '');
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'btn btn-secondary js-remove-multi';
+        removeButton.textContent = 'Remover';
+
+        removeButton.addEventListener('click', () => {
+          row.remove();
+          if (!container.querySelector('.js-multi-input')) appendMultiFieldEntry(container, '', label);
+          container.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+
+        row.appendChild(input);
+        row.appendChild(removeButton);
+        container.appendChild(row);
+      }
+
+      function renderMultiField(container, values, label) {
+        container.innerHTML = '';
+        const normalizedValues = (values || []).length ? values : [''];
+        normalizedValues.forEach((value) => appendMultiFieldEntry(container, value, label));
+      }
+
+      function collectMultiFieldValues(container) {
+        return [...container.querySelectorAll('.js-multi-input')]
+          .map((input) => String(input.value || '').trim())
+          .filter((value) => value !== '');
+      }
+
+      function applyNotProvidedState(container, checkbox, value, label) {
+        const isNotProvided = normalizeText(value) === 'NAO VEIO';
+        checkbox.checked = isNotProvided;
+        if (isNotProvided) {
+          renderMultiField(container, ['não veio'], label);
+        }
+        setMultiFieldDisabled(container, isNotProvided);
+      }
+
+      function setMultiFieldDisabled(container, disabled) {
+        [...container.querySelectorAll('input, button')].forEach((element) => {
+          element.disabled = !!disabled;
+        });
+      }
+
+      function toggleNaoVeio(container, checkbox, label) {
         if (checkbox.checked) {
-          input.value = 'não veio';
-          input.disabled = true;
+          renderMultiField(container, ['não veio'], label);
+          setMultiFieldDisabled(container, true);
           return;
         }
 
-        input.disabled = false;
-        if (normalizeText(input.value) === 'NAO VEIO') input.value = '';
+        const values = parseMultiText(normalizeMultiText(collectMultiFieldValues(container)));
+        renderMultiField(container, values.length ? values : [''], label);
+        setMultiFieldDisabled(container, false);
       }
 
       function normalizeBoletoValue(value) {
@@ -385,8 +478,13 @@
         const card = getCardByOc(oc);
         if (!card) return;
 
-        const nf = (card.querySelector('.js-nf-input').value || '').trim();
-        const nfFrete = (card.querySelector('.js-nf-frete-input').value || '').trim();
+        const nfContainer = card.querySelector('.js-nf-multi');
+        const nfFreteContainer = card.querySelector('.js-nf-frete-multi');
+        const nfNaoVeio = card.querySelector('.js-nf-nao-veio');
+        const nfFreteNaoVeio = card.querySelector('.js-nf-frete-nao-veio');
+
+        const nf = nfNaoVeio.checked ? 'não veio' : normalizeMultiText(collectMultiFieldValues(nfContainer));
+        const nfFrete = nfFreteNaoVeio.checked ? 'não veio' : normalizeMultiText(collectMultiFieldValues(nfFreteContainer));
         const boleto = card.querySelector('.js-boleto-select').value;
 
         runServerCall(oc, (runner) => runner.updateOrderHeaderFields(oc, nf, nfFrete, boleto), {
@@ -512,9 +610,12 @@
           };
         });
 
+        const nfNaoVeio = card.querySelector('.js-nf-nao-veio').checked;
+        const nfFreteNaoVeio = card.querySelector('.js-nf-frete-nao-veio').checked;
+
         return {
-          nf: (card.querySelector('.js-nf-input').value || '').trim(),
-          nfFrete: (card.querySelector('.js-nf-frete-input').value || '').trim(),
+          nf: nfNaoVeio ? 'não veio' : normalizeMultiText(collectMultiFieldValues(card.querySelector('.js-nf-multi'))),
+          nfFrete: nfFreteNaoVeio ? 'não veio' : normalizeMultiText(collectMultiFieldValues(card.querySelector('.js-nf-frete-multi'))),
           boleto: card.querySelector('.js-boleto-select').value,
           items: items,
         };
@@ -557,28 +658,10 @@
         runServerCall(oc, (runner) => runner.receiveOrder(oc, labelWidth, labelHeight), {
           success: (response) => {
             processingOrders.delete(String(oc));
+
             if (button) {
               button.textContent = 'Recebido';
               button.dataset.locked = 'true';
-            }
-
-            updateCacheField(oc, 'status', (response && response.status) || 'RECEBIDO');
-            updateCacheField(oc, 'receivedAt', new Date().toISOString());
-            renderFilteredOrders();
-
-            // Mantém uma única declaração de printUrl para evitar erro de parse por redeclaração.
-            const printUrl = buildPrintUrl(response && response.pdfFileId ? response.pdfFileId : '');
-            if (printUrl) {
-              window.open(printUrl, '_blank', 'noopener');
-            }
-
-            updateCacheField(oc, 'status', (response && response.status) || 'RECEBIDO');
-            updateCacheField(oc, 'receivedAt', new Date().toISOString());
-            renderFilteredOrders();
-
-            const printUrl = buildPrintUrl(response && response.pdfFileId ? response.pdfFileId : '');
-            if (printUrl) {
-              window.open(printUrl, '_blank', 'noopener');
             }
 
             updateCacheField(oc, 'status', (response && response.status) || 'RECEBIDO');

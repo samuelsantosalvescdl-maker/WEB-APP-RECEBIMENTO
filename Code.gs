@@ -107,23 +107,10 @@ function getNamedRangeFirstColumnValues_(spreadsheet, rangeName) {
   const range = getNamedRange_(spreadsheet, rangeName);
   const values = range.offset(0, 0, range.getNumRows(), 1).getDisplayValues();
 
-  const result = values
+  return values
     .map((row) => row[0])
     .filter((value) => value !== null && value !== undefined && String(value).trim() !== '')
     .map((value) => String(value).trim());
-
-  Logger.log(JSON.stringify({
-    fn: 'getNamedRangeFirstColumnValues_',
-    rangeName: rangeName,
-    a1: range.getA1Notation(),
-    sheet: range.getSheet().getName(),
-    numRows: range.getNumRows(),
-    numCols: range.getNumColumns(),
-    resultCount: result.length,
-    sample: result.slice(0, 10)
-  }));
-
-  return result;
 }
 
 function debugDropdownSources() {
@@ -363,8 +350,83 @@ function getSpreadsheet_() {
   try {
     return SpreadsheetApp.openById(SPREADSHEET_ID);
   } catch (error) {
-    throw new Error('Falha ao abrir a planilha pelo ID configurado. Verifique SPREADSHEET_ID.');
+    throw new Error(
+      'Falha ao abrir a planilha pelo ID configurado. '
+      + `SPREADSHEET_ID=${SPREADSHEET_ID}. `
+      + `Detalhe original: ${error && error.message ? error.message : error}`
+    );
   }
+}
+
+function safeUserEmail_(userObj) {
+  try {
+    return userObj && typeof userObj.getEmail === 'function' ? userObj.getEmail() : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function debugInfraAccess() {
+  const result = {
+    effectiveUser: safeUserEmail_(Session.getEffectiveUser()),
+    activeUser: safeUserEmail_(Session.getActiveUser()),
+    spreadsheetId: SPREADSHEET_ID,
+    folderId: LABELS_FOLDER_ID,
+    spreadsheet: null,
+    folder: null,
+    namedRanges: {}
+  };
+
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    result.spreadsheet = {
+      ok: true,
+      id: ss.getId(),
+      name: ss.getName()
+    };
+
+    ['CONT_FIN', 'REC_POR_ITEM', 'EMP_COMP', 'EMP_FORN'].forEach((name) => {
+      try {
+        const range = ss.getRangeByName(name);
+        result.namedRanges[name] = range ? {
+          ok: true,
+          a1: range.getA1Notation(),
+          sheet: range.getSheet().getName(),
+          rows: range.getNumRows(),
+          cols: range.getNumColumns()
+        } : {
+          ok: false,
+          message: 'Named range não encontrado'
+        };
+      } catch (err) {
+        result.namedRanges[name] = {
+          ok: false,
+          message: err && err.message ? err.message : String(err)
+        };
+      }
+    });
+  } catch (error) {
+    result.spreadsheet = {
+      ok: false,
+      message: error && error.message ? error.message : String(error)
+    };
+  }
+
+  try {
+    const folder = DriveApp.getFolderById(LABELS_FOLDER_ID);
+    result.folder = {
+      ok: true,
+      id: folder.getId(),
+      name: folder.getName()
+    };
+  } catch (error) {
+    result.folder = {
+      ok: false,
+      message: error && error.message ? error.message : String(error)
+    };
+  }
+
+  return result;
 }
 
 function getNamedRange_(spreadsheet, rangeName) {
