@@ -114,13 +114,13 @@ function getNamedRangeFirstColumnValues_(spreadsheet, rangeName) {
 
   Logger.log(JSON.stringify({
     fn: 'getNamedRangeFirstColumnValues_',
-    rangeName,
+    rangeName: rangeName,
     a1: range.getA1Notation(),
     sheet: range.getSheet().getName(),
     numRows: range.getNumRows(),
     numCols: range.getNumColumns(),
     resultCount: result.length,
-    sample: result.slice(0, 10),
+    sample: result.slice(0, 10)
   }));
 
   return result;
@@ -143,7 +143,7 @@ function debugDropdownSources() {
       rows: empCompRange.getNumRows(),
       cols: empCompRange.getNumColumns(),
       count: buyers.length,
-      sample: buyers.slice(0, 10),
+      sample: buyers.slice(0, 10)
     },
     empForn: {
       a1: empFornRange.getA1Notation(),
@@ -151,8 +151,8 @@ function debugDropdownSources() {
       rows: empFornRange.getNumRows(),
       cols: empFornRange.getNumColumns(),
       count: suppliers.length,
-      sample: suppliers.slice(0, 10),
-    },
+      sample: suppliers.slice(0, 10)
+    }
   };
 }
 
