@@ -5,15 +5,15 @@
   "dependencies": {
     "enabledAdvancedServices": [
       {
-        "userSymbol": "Tasks",
-        "serviceId": "tasks",
-        "version": "v1"
+        "userSymbol": "Calendar",
+        "serviceId": "calendar",
+        "version": "v3"
       }
     ]
   },
   "oauthScopes": [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/documents"
   ],
