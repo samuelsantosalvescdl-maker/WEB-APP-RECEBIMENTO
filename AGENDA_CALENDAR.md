@@ -33,8 +33,14 @@ inicial. Quando a quarta coluna estiver preenchida, o título terá o formato
 2. Confirme em **Serviços**, no editor do Apps Script, que a **Google Calendar API**
    está habilitada. O manifesto já declara o serviço avançado `Calendar` versão `v3`.
 3. Reabra a planilha para executar `onOpen` e mostrar o menu **Agenda**.
-4. Na primeira utilização, autorize o acesso à planilha, ao Google Calendar, ao Drive
-   e ao Google Docs.
+4. Na primeira utilização, autorize o acesso à planilha, ao Google Calendar, ao Drive,
+   ao Google Docs e à interface da planilha. O acesso à interface permite que o
+   comando **Gerar PDF** mostre a janela com o link para download.
+
+Se o script já tiver sido autorizado antes da inclusão dessas permissões, execute
+`gerarPDF` uma vez diretamente pelo editor do Apps Script e aceite a nova solicitação
+de autorização. Depois disso, o comando pode ser usado normalmente pelo menu da
+planilha.
 
 **Atualizar agenda** remove todos os eventos da agenda indicada em `ID` antes de criar
 as novas ocorrências. Use uma agenda exclusiva para esta automação se houver eventos
