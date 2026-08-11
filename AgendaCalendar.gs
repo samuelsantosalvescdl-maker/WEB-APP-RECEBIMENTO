@@ -111,8 +111,10 @@ function readTaskDefinitions_(spreadsheet) {
 
     const title = String(displayValues[index][0] || '').trim();
     const startDate = coerceDate_(row[2]);
-    if (!title) throw new Error(`Título vazio na linha ${range.getRow() + index} de "TAREFAS".`);
-    if (!startDate) throw new Error(`Data inicial inválida na linha ${range.getRow() + index} de "TAREFAS".`);
+    // Linhas incompletas podem permanecer no intervalo nomeado sem impedir a
+    // atualizacao das demais. Somente linhas com titulo, recorrencia e data
+    // inicial validos se tornam eventos.
+    if (!title || !startDate) return;
 
     definitions.push({
       title,

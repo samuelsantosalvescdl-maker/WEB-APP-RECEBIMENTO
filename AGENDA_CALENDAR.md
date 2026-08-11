@@ -22,10 +22,11 @@ As colunas de `TAREFAS` são:
 4. texto acrescentado ao título depois de ` - ` e exibido da mesma forma no PDF;
 5. descrição do evento, inclusive os links aplicados a partes do texto.
 
-Uma linha somente é processada quando sua segunda coluna contém uma recorrência.
-O script cria eventos de dia inteiro individuais durante dois anos a partir da data
-inicial. Quando a quarta coluna estiver preenchida, o título terá o formato
-`Nome da tarefa - valor da quarta coluna`.
+Uma linha somente é processada quando contém recorrência, título e uma data inicial
+válida. Linhas sem título ou sem data são ignoradas e não impedem a criação das
+outras tarefas válidas. O script cria eventos de dia inteiro individuais durante
+dois anos a partir da data inicial. Quando a quarta coluna estiver preenchida, o
+título terá o formato `Nome da tarefa - valor da quarta coluna`.
 
 ## Instalação e autorização
 
