@@ -28,6 +28,18 @@ outras tarefas válidas. O script cria eventos de dia inteiro individuais durant
 dois anos a partir da data inicial. Quando a quarta coluna estiver preenchida, o
 título terá o formato `Nome da tarefa - valor da quarta coluna`.
 
+## Atualização em blocos
+
+Para não exceder o tempo máximo do Apps Script, **Atualizar agenda** remove e cria
+no máximo 75 eventos por execução (ou trabalha por até quatro minutos). Se ainda
+houver trabalho, um gatilho continua automaticamente aproximadamente um minuto
+depois. Uma notificação aparece na planilha quando todo o processo termina.
+
+O progresso pertence ao usuário que iniciou a atualização. Clicar novamente em
+**Atualizar agenda** cancela a continuação anterior desse usuário e reinicia todo o
+processo, inclusive a exclusão dos eventos. Aguarde a mensagem de conclusão antes de
+iniciar outra atualização.
+
 ## Instalação e autorização
 
 1. Associe o projeto do Apps Script à planilha e copie os arquivos do projeto.

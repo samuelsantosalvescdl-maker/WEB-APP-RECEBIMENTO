@@ -13,6 +13,10 @@ const AGENDA_CALENDAR = Object.freeze({
   TASKS_RANGE: 'TAREFAS',
   MONTH_RANGE: 'MÊS',
   YEARS_TO_CREATE: 2,
+  UPDATE_HANDLER: 'continuarAtualizacaoAgenda',
+  UPDATE_STATE_PROPERTY: 'AGENDA_CALENDAR_UPDATE_STATE',
+  BATCH_SIZE: 75,
+  MAX_BATCH_MILLISECONDS: 240000,
   PDF_FOLDER_NAME: 'Calendários de tarefas',
   WEEKDAYS: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'],
   MONTHS: [
@@ -30,7 +34,7 @@ function onOpen() {
     .addToUi();
 }
 
-/** Apaga a agenda indicada em ID e a repovoa com eventos para dois anos. */
+/** Inicia a atualizacao em blocos e agenda as continuacoes automaticamente. */
 function atualizarAgenda() {
   const ui = SpreadsheetApp.getUi();
 
@@ -42,26 +46,105 @@ function atualizarAgenda() {
     if (!calendarId) throw new Error('O intervalo nomeado "ID" está vazio.');
     if (!definitions.length) throw new Error('Nenhuma tarefa válida foi encontrada em "TAREFAS".');
 
-    deleteAllCalendarEvents_(String(calendarId).trim());
-
-    let created = 0;
-    definitions.forEach((definition) => {
-      occurrencesFor_(definition.startDate, definition.recurrence).forEach((date) => {
-        Calendar.Events.insert({
-          summary: buildEventTitle_(definition.title, definition.detail),
-          description: definition.description,
-          start: { date: calendarDate_(date) },
-          end: { date: calendarDate_(addDays_(date, 1)) }
-        }, String(calendarId).trim());
-        created += 1;
-      });
+    cancelUpdateTriggers_();
+    saveUpdateState_({
+      spreadsheetId: spreadsheet.getId(),
+      calendarId: String(calendarId).trim(),
+      phase: 'deleting',
+      definitionIndex: 0,
+      occurrenceIndex: 0,
+      created: 0,
+      total: countOccurrences_(definitions),
+      startedAt: new Date().toISOString()
     });
 
-    ui.alert('Agenda atualizada', `${created} eventos de dia inteiro foram criados para os próximos 2 anos.`, ui.ButtonSet.OK);
+    const result = processUpdateBatch_();
+    const message = result.complete
+      ? `${result.created} eventos de dia inteiro foram criados.`
+      : `Atualização iniciada em blocos (${result.created} de ${result.total} eventos criados). ` +
+        'O script continuará automaticamente até concluir.';
+    ui.alert('Atualização da agenda', message, ui.ButtonSet.OK);
   } catch (error) {
     ui.alert('Não foi possível atualizar a agenda', error.message || String(error), ui.ButtonSet.OK);
     throw error;
   }
+}
+
+/** Continua uma atualizacao iniciada por atualizarAgenda (acionada por gatilho). */
+function continuarAtualizacaoAgenda() {
+  const lock = LockService.getUserLock();
+  if (!lock.tryLock(1000)) return;
+
+  try {
+    processUpdateBatch_();
+  } catch (error) {
+    cancelUpdateTriggers_();
+    const state = loadUpdateState_();
+    if (state) {
+      state.error = error.message || String(error);
+      saveUpdateState_(state);
+      try {
+        SpreadsheetApp.openById(state.spreadsheetId).toast(
+          `A atualização foi interrompida: ${state.error}`,
+          'Agenda',
+          15
+        );
+      } catch (toastError) {
+        console.error(toastError);
+      }
+    }
+    throw error;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function processUpdateBatch_() {
+  const state = loadUpdateState_();
+  if (!state) throw new Error('Não existe uma atualização de agenda em andamento.');
+
+  const started = Date.now();
+  let operations = 0;
+
+  if (state.phase === 'deleting') {
+    operations = deleteCalendarEventsBatch_(state.calendarId, started);
+    if (operations < 0) {
+      state.phase = 'creating';
+      operations = 0;
+    } else {
+      saveUpdateState_(state);
+      scheduleUpdateContinuation_();
+      return updateResult_(state, false);
+    }
+  }
+
+  const spreadsheet = SpreadsheetApp.openById(state.spreadsheetId);
+  const definitions = readTaskDefinitions_(spreadsheet);
+
+  while (state.definitionIndex < definitions.length && !batchLimitReached_(started, operations)) {
+    const definition = definitions[state.definitionIndex];
+    const occurrences = occurrencesFor_(definition.startDate, definition.recurrence);
+
+    if (state.occurrenceIndex >= occurrences.length) {
+      state.definitionIndex += 1;
+      state.occurrenceIndex = 0;
+      continue;
+    }
+
+    insertCalendarEvent_(state.calendarId, definition, occurrences[state.occurrenceIndex]);
+    state.occurrenceIndex += 1;
+    state.created += 1;
+    operations += 1;
+  }
+
+  if (state.definitionIndex >= definitions.length) {
+    finishUpdate_(state, spreadsheet);
+    return updateResult_(state, true);
+  }
+
+  saveUpdateState_(state);
+  scheduleUpdateContinuation_();
+  return updateResult_(state, false);
 }
 
 /** Gera o calendario do mes informado em MÊS, sempre usando o ano atual. */
@@ -210,19 +293,76 @@ function createCalendarPdf_(entriesByDay, month, year) {
   return file;
 }
 
-function deleteAllCalendarEvents_(calendarId) {
-  // Consulta sempre a primeira pagina novamente, pois as exclusoes alteram a
-  // paginacao. singleEvents=false retorna tambem os eventos recorrentes principais.
-  while (true) {
+function deleteCalendarEventsBatch_(calendarId, started) {
+  let deleted = 0;
+  while (!batchLimitReached_(started, deleted)) {
     const response = Calendar.Events.list(calendarId, {
-      maxResults: 2500,
+      maxResults: Math.min(AGENDA_CALENDAR.BATCH_SIZE - deleted, 100),
       showDeleted: false,
       singleEvents: false
     });
     const items = response.items || [];
-    if (!items.length) return;
-    items.forEach((event) => Calendar.Events.remove(calendarId, event.id));
+    if (!items.length) return -1;
+    for (let index = 0; index < items.length && !batchLimitReached_(started, deleted); index += 1) {
+      Calendar.Events.remove(calendarId, items[index].id);
+      deleted += 1;
+    }
   }
+  return deleted;
+}
+
+function insertCalendarEvent_(calendarId, definition, date) {
+  Calendar.Events.insert({
+    summary: buildEventTitle_(definition.title, definition.detail),
+    description: definition.description,
+    start: { date: calendarDate_(date) },
+    end: { date: calendarDate_(addDays_(date, 1)) }
+  }, calendarId);
+}
+
+function countOccurrences_(definitions) {
+  return definitions.reduce((total, definition) =>
+    total + occurrencesFor_(definition.startDate, definition.recurrence).length, 0);
+}
+
+function batchLimitReached_(started, operations) {
+  return operations >= AGENDA_CALENDAR.BATCH_SIZE ||
+    Date.now() - started >= AGENDA_CALENDAR.MAX_BATCH_MILLISECONDS;
+}
+
+function updateResult_(state, complete) {
+  return { complete, created: state.created, total: state.total };
+}
+
+function finishUpdate_(state, spreadsheet) {
+  state.phase = 'complete';
+  state.completedAt = new Date().toISOString();
+  saveUpdateState_(state);
+  cancelUpdateTriggers_();
+  spreadsheet.toast(`Atualização concluída: ${state.created} eventos criados.`, 'Agenda', 10);
+}
+
+function loadUpdateState_() {
+  const value = PropertiesService.getUserProperties().getProperty(AGENDA_CALENDAR.UPDATE_STATE_PROPERTY);
+  return value ? JSON.parse(value) : null;
+}
+
+function saveUpdateState_(state) {
+  PropertiesService.getUserProperties().setProperty(
+    AGENDA_CALENDAR.UPDATE_STATE_PROPERTY,
+    JSON.stringify(state)
+  );
+}
+
+function scheduleUpdateContinuation_() {
+  cancelUpdateTriggers_();
+  ScriptApp.newTrigger(AGENDA_CALENDAR.UPDATE_HANDLER).timeBased().after(60 * 1000).create();
+}
+
+function cancelUpdateTriggers_() {
+  ScriptApp.getProjectTriggers().forEach((trigger) => {
+    if (trigger.getHandlerFunction() === AGENDA_CALENDAR.UPDATE_HANDLER) ScriptApp.deleteTrigger(trigger);
+  });
 }
 
 function buildEventTitle_(title, detail) {
