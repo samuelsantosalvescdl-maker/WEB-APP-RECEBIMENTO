@@ -31,14 +31,24 @@ título terá o formato `Nome da tarefa - valor da quarta coluna`.
 ## Atualização em blocos
 
 Para não exceder o tempo máximo do Apps Script, **Atualizar agenda** remove e cria
-no máximo 75 eventos por execução (ou trabalha por até quatro minutos). Se ainda
-houver trabalho, um gatilho continua automaticamente aproximadamente um minuto
-depois. Uma notificação aparece na planilha quando todo o processo termina.
+no máximo 40 eventos por execução (ou trabalha por até três minutos e meio). Antes
+de iniciar cada bloco, o script deixa preparado um gatilho de segurança para continuar
+automaticamente aproximadamente um minuto depois. Assim, mesmo uma interrupção
+abrupta por limite de tempo não deixa o processo sem continuação.
 
-O progresso pertence ao usuário que iniciou a atualização. Clicar novamente em
-**Atualizar agenda** cancela a continuação anterior desse usuário e reinicia todo o
-processo, inclusive a exclusão dos eventos. Aguarde a mensagem de conclusão antes de
-iniciar outra atualização.
+O progresso é salvo depois de cada evento criado. Cada ocorrência recebe um ID
+determinístico; portanto, repetir um bloco interrompido não cria uma cópia duplicada.
+A exclusão também tolera resultados antigos mantidos temporariamente pela API do
+Calendar. Uma notificação aparece na planilha quando todo o processo termina.
+
+O progresso é compartilhado pelo projeto e protegido por um bloqueio. Enquanto uma
+atualização estiver ativa, outro clique ou outro usuário não poderá iniciar uma
+segunda atualização concorrente. Isso evita que um processo apague os eventos que o
+outro acabou de criar. Aguarde a mensagem de conclusão antes de iniciar novamente.
+
+Não altere, insira ou remova linhas de `TAREFAS` enquanto uma atualização estiver
+em andamento. Se isso acontecer, o processo é interrompido para evitar uma agenda
+parcial; depois das alterações, execute **Atualizar agenda** novamente.
 
 ## Instalação e autorização
 
