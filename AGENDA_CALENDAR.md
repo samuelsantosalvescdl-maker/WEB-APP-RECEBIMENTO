@@ -24,20 +24,21 @@ As colunas de `TAREFAS` são:
 
 Uma linha somente é processada quando contém recorrência, título e uma data inicial
 válida. Linhas sem título ou sem data são ignoradas e não impedem a criação das
-outras tarefas válidas. O script cria eventos de dia inteiro individuais durante
-dois anos a partir da data inicial. Quando a quarta coluna estiver preenchida, o
+outras tarefas válidas. O script cria uma única série de evento de dia inteiro para
+cada linha, contendo todas as datas dos dois anos a partir da data inicial. Quando a quarta coluna estiver preenchida, o
 título terá o formato `Nome da tarefa - valor da quarta coluna`.
 
 ## Atualização em blocos
 
 Para não exceder o tempo máximo do Apps Script, **Atualizar agenda** remove e cria
-no máximo 40 eventos por execução (ou trabalha por até três minutos e meio). Antes
+no máximo 10 séries por execução (ou trabalha por até um minuto). Antes
 de iniciar cada bloco, o script deixa preparado um gatilho de segurança para continuar
 automaticamente aproximadamente um minuto depois. Assim, mesmo uma interrupção
 abrupta por limite de tempo não deixa o processo sem continuação.
 
-O progresso é salvo depois de cada evento criado. Cada ocorrência recebe um ID
-determinístico; portanto, repetir um bloco interrompido não cria uma cópia duplicada.
+O progresso é salvo depois de cada série criada. Cada linha recebe um ID determinístico
+e todas as suas datas ficam em uma única série; portanto, repetir um bloco interrompido
+não cria uma cópia duplicada e não exige centenas de chamadas à API.
 A exclusão também tolera resultados antigos mantidos temporariamente pela API do
 Calendar. Uma notificação aparece na planilha quando todo o processo termina.
 

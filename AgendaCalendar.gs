@@ -13,10 +13,11 @@ const AGENDA_CALENDAR = Object.freeze({
   TASKS_RANGE: 'TAREFAS',
   MONTH_RANGE: 'MÊS',
   YEARS_TO_CREATE: 2,
+  UPDATE_STATE_VERSION: 2,
   UPDATE_HANDLER: 'continuarAtualizacaoAgenda',
   UPDATE_STATE_PROPERTY: 'AGENDA_CALENDAR_UPDATE_STATE',
-  BATCH_SIZE: 40,
-  MAX_BATCH_MILLISECONDS: 210000,
+  BATCH_SIZE: 10,
+  MAX_BATCH_MILLISECONDS: 60000,
   PDF_FOLDER_NAME: 'Calendários de tarefas',
   WEEKDAYS: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'],
   MONTHS: [
@@ -55,12 +56,12 @@ function atualizarAgenda() {
     cancelUpdateTriggers_();
     saveUpdateState_({
       spreadsheetId: spreadsheet.getId(),
+      version: AGENDA_CALENDAR.UPDATE_STATE_VERSION,
       calendarId: String(calendarId).trim(),
       phase: 'deleting',
       definitionIndex: 0,
-      occurrenceIndex: 0,
       created: 0,
-      total: countOccurrences_(definitions),
+      total: definitions.length,
       definitionsSignature: definitionsSignature_(definitions),
       startedAt: new Date().toISOString()
     });
@@ -69,7 +70,7 @@ function atualizarAgenda() {
     const message = result.complete
       ? `${result.created} eventos de dia inteiro foram criados.`
       : `Atualização iniciada em blocos (${result.created} de ${result.total} eventos criados). ` +
-        'O script continuará automaticamente até concluir.';
+        'O script continuará automaticamente. Cada evento criado contém sua recorrência completa.';
     ui.alert('Atualização da agenda', message, ui.ButtonSet.OK);
   } catch (error) {
     ui.alert('Não foi possível atualizar a agenda', error.message || String(error), ui.ButtonSet.OK);
@@ -141,21 +142,12 @@ function processUpdateBatch_() {
 
   while (state.definitionIndex < definitions.length && !batchLimitReached_(started, operations)) {
     const definition = definitions[state.definitionIndex];
-    const occurrences = occurrencesFor_(definition.startDate, definition.recurrence);
-
-    if (state.occurrenceIndex >= occurrences.length) {
-      state.definitionIndex += 1;
-      state.occurrenceIndex = 0;
-      continue;
-    }
-
-    insertCalendarEvent_(
+    insertRecurringCalendarEvent_(
       state.calendarId,
       definition,
-      occurrences[state.occurrenceIndex],
-      deterministicEventId_(state.spreadsheetId, definition, occurrences[state.occurrenceIndex])
+      deterministicEventId_(state.spreadsheetId, definition)
     );
-    state.occurrenceIndex += 1;
+    state.definitionIndex += 1;
     state.created += 1;
     operations += 1;
     // Persistir apos cada evento torna a retomada segura mesmo em timeout.
@@ -347,14 +339,15 @@ function removeCalendarEventSafely_(calendarId, eventId) {
   }
 }
 
-function insertCalendarEvent_(calendarId, definition, date, eventId) {
+function insertRecurringCalendarEvent_(calendarId, definition, eventId) {
   try {
     Calendar.Events.insert({
       id: eventId,
       summary: buildEventTitle_(definition.title, definition.detail),
       description: definition.description,
-      start: { date: calendarDate_(date) },
-      end: { date: calendarDate_(addDays_(date, 1)) },
+      start: { date: calendarDate_(definition.startDate) },
+      end: { date: calendarDate_(addDays_(definition.startDate, 1)) },
+      recurrence: recurrenceDates_(definition.startDate, definition.recurrence),
       extendedProperties: { private: { managedBy: 'AgendaCalendar' } }
     }, calendarId);
   } catch (error) {
@@ -364,13 +357,15 @@ function insertCalendarEvent_(calendarId, definition, date, eventId) {
   }
 }
 
-function countOccurrences_(definitions) {
-  return definitions.reduce((total, definition) =>
-    total + occurrencesFor_(definition.startDate, definition.recurrence).length, 0);
+function recurrenceDates_(startDate, recurrence) {
+  const additionalDates = occurrencesFor_(startDate, recurrence)
+    .slice(1)
+    .map((date) => calendarDate_(date).replace(/-/g, ''));
+  return additionalDates.length ? [`RDATE;VALUE=DATE:${additionalDates.join(',')}`] : [];
 }
 
-function deterministicEventId_(spreadsheetId, definition, date) {
-  const input = [spreadsheetId, definition.sourceRow, calendarDate_(date)].join('|');
+function deterministicEventId_(spreadsheetId, definition) {
+  const input = [spreadsheetId, definition.sourceRow].join('|');
   const bytes = Utilities.computeDigest(
     Utilities.DigestAlgorithm.SHA_256,
     input,
@@ -425,7 +420,8 @@ function loadUpdateState_() {
 }
 
 function isUpdateActive_(state) {
-  if (!state || !['deleting', 'creating'].includes(state.phase)) return false;
+  if (!state || state.version !== AGENDA_CALENDAR.UPDATE_STATE_VERSION ||
+      !['deleting', 'creating'].includes(state.phase)) return false;
   const lastUpdate = new Date(state.updatedAt || state.startedAt || 0).getTime();
   return Date.now() - lastUpdate < 24 * 60 * 60 * 1000;
 }
