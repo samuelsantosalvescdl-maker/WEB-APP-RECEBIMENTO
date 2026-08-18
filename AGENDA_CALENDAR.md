@@ -42,6 +42,23 @@ não cria uma cópia duplicada e não exige centenas de chamadas à API.
 A exclusão também tolera resultados antigos mantidos temporariamente pela API do
 Calendar. Uma notificação aparece na planilha quando todo o processo termina.
 
+A criação somente começa depois que a API retorna a agenda vazia em três execuções
+consecutivas e uma quarta consulta final também confirma que não existe nenhum evento.
+A consulta não usa limite de data: eventos passados, futuros, avulsos e séries
+recorrentes são removidos. Essa confirmação adicional pode acrescentar alguns minutos
+à primeira sincronização, mas impede que a inserção comece sobre uma agenda que ainda
+contenha eventos antigos.
+
+Todas as listagens de exclusão e verificação percorrem `nextPageToken`, inclusive
+quando uma página intermediária não contém itens. Uma página vazia somente confirma o
+fim da agenda quando também não existe uma próxima página.
+
+Cada atualização recebe um `runId` novo. Os IDs dos eventos incluem esse `runId`, a
+planilha e a linha de origem: uma retomada da mesma atualização reutiliza o ID com
+segurança, mas uma atualização futura não reutiliza IDs de eventos apagados. Um conflito
+409 somente é aceito depois de consultar o evento e validar sua origem, execução,
+conteúdo e recorrência.
+
 O progresso é compartilhado pelo projeto e protegido por um bloqueio. Enquanto uma
 atualização estiver ativa, outro clique ou outro usuário não poderá iniciar uma
 segunda atualização concorrente. Isso evita que um processo apague os eventos que o

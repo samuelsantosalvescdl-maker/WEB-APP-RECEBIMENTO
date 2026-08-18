@@ -13,11 +13,13 @@ const AGENDA_CALENDAR = Object.freeze({
   TASKS_RANGE: 'TAREFAS',
   MONTH_RANGE: 'MÊS',
   YEARS_TO_CREATE: 2,
-  UPDATE_STATE_VERSION: 2,
+  UPDATE_STATE_VERSION: 4,
   UPDATE_HANDLER: 'continuarAtualizacaoAgenda',
   UPDATE_STATE_PROPERTY: 'AGENDA_CALENDAR_UPDATE_STATE',
   BATCH_SIZE: 10,
   MAX_BATCH_MILLISECONDS: 60000,
+  SAFETY_TRIGGER_DELAY_MILLISECONDS: 7 * 60 * 1000,
+  EMPTY_CALENDAR_CONFIRMATIONS: 3,
   PDF_FOLDER_NAME: 'Calendários de tarefas',
   WEEKDAYS: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'],
   MONTHS: [
@@ -39,6 +41,7 @@ function onOpen() {
 function atualizarAgenda() {
   const ui = SpreadsheetApp.getUi();
   const lock = LockService.getScriptLock();
+  let runStarted = false;
 
   try {
     if (!lock.tryLock(5000)) throw new Error('Já existe uma atualização da agenda em execução. Aguarde.');
@@ -54,17 +57,23 @@ function atualizarAgenda() {
     if (!definitions.length) throw new Error('Nenhuma tarefa válida foi encontrada em "TAREFAS".');
 
     cancelUpdateTriggers_();
+    const runId = Utilities.getUuid();
     saveUpdateState_({
       spreadsheetId: spreadsheet.getId(),
       version: AGENDA_CALENDAR.UPDATE_STATE_VERSION,
+      runId,
       calendarId: String(calendarId).trim(),
       phase: 'deleting',
       definitionIndex: 0,
+      deletionEmptyChecks: 0,
+      deleted: 0,
       created: 0,
       total: definitions.length,
       definitionsSignature: definitionsSignature_(definitions),
       startedAt: new Date().toISOString()
     });
+    runStarted = true;
+    console.log(`[AgendaCalendar] runId=${runId} fase=deleting atualização iniciada`);
 
     const result = processUpdateBatch_();
     const message = result.complete
@@ -73,6 +82,19 @@ function atualizarAgenda() {
         'O script continuará automaticamente. Cada evento criado contém sua recorrência completa.';
     ui.alert('Atualização da agenda', message, ui.ButtonSet.OK);
   } catch (error) {
+    if (runStarted) {
+      cancelUpdateTriggers_();
+      const state = loadUpdateState_();
+      if (state) {
+        state.phase = 'error';
+        state.error = error.message || String(error);
+        state.continuationTriggerId = null;
+        saveUpdateState_(state);
+        console.error(`[AgendaCalendar] runId=${state.runId} fase=error erro=${state.error}`);
+      }
+    } else {
+      console.error(`[AgendaCalendar] falha antes de iniciar a execução: ${error.message || String(error)}`);
+    }
     ui.alert('Não foi possível atualizar a agenda', error.message || String(error), ui.ButtonSet.OK);
     throw error;
   } finally {
@@ -81,7 +103,13 @@ function atualizarAgenda() {
 }
 
 /** Continua uma atualizacao iniciada por atualizarAgenda (acionada por gatilho). */
-function continuarAtualizacaoAgenda() {
+function continuarAtualizacaoAgenda(event) {
+  const expectedState = loadUpdateState_();
+  if (event && event.triggerUid && expectedState && expectedState.continuationTriggerId &&
+      event.triggerUid !== expectedState.continuationTriggerId) {
+    console.log(`[AgendaCalendar] runId=${expectedState.runId} gatilho obsoleto ignorado`);
+    return;
+  }
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
 
@@ -93,7 +121,9 @@ function continuarAtualizacaoAgenda() {
     if (state) {
       state.error = error.message || String(error);
       state.phase = 'error';
+      state.continuationTriggerId = null;
       saveUpdateState_(state);
+      console.error(`[AgendaCalendar] runId=${state.runId} fase=error erro=${state.error}`);
       try {
         SpreadsheetApp.openById(state.spreadsheetId).toast(
           `A atualização foi interrompida: ${state.error}`,
@@ -117,19 +147,36 @@ function processUpdateBatch_() {
   // O proximo gatilho e criado antes das chamadas ao Calendar. Assim, mesmo que
   // esta execucao seja encerrada abruptamente pelo limite do Apps Script, havera
   // uma nova tentativa para retomar o estado salvo.
-  scheduleUpdateContinuation_(AGENDA_CALENDAR.MAX_BATCH_MILLISECONDS + 60000);
+  scheduleUpdateContinuation_(AGENDA_CALENDAR.SAFETY_TRIGGER_DELAY_MILLISECONDS, state);
 
   const started = Date.now();
   let operations = 0;
 
   if (state.phase === 'deleting') {
-    operations = deleteCalendarEventsBatch_(state.calendarId, started);
-    if (operations < 0) {
-      state.phase = 'creating';
-      operations = 0;
-    } else {
-      saveUpdateState_(state);
-      scheduleUpdateContinuation_();
+    const deletion = deleteCalendarEventsBatch_(state.calendarId, started);
+    operations = deletion.deleted;
+    state.deleted = (state.deleted || 0) + deletion.deleted;
+    state.deletionEmptyChecks = deletion.empty ? (state.deletionEmptyChecks || 0) + 1 : 0;
+    console.log(
+      `[AgendaCalendar] runId=${state.runId} fase=deleting excluídosNoBloco=${deletion.deleted} ` +
+      `totalExcluído=${state.deleted} confirmaçõesVazias=${state.deletionEmptyChecks}`
+    );
+
+    if (state.deletionEmptyChecks >= AGENDA_CALENDAR.EMPTY_CALENDAR_CONFIRMATIONS) {
+      // Uma ultima leitura independente impede iniciar a criacao se a API voltar
+      // a apresentar um evento durante a janela de consistencia eventual.
+      if (calendarHasAnyEvent_(state.calendarId)) {
+        state.deletionEmptyChecks = 0;
+      } else {
+        state.phase = 'creating';
+        operations = 0;
+        console.log(`[AgendaCalendar] runId=${state.runId} agenda confirmada vazia; fase=creating`);
+      }
+    }
+
+    saveUpdateState_(state);
+    if (state.phase === 'deleting') {
+      scheduleUpdateContinuation_(null, state);
       return updateResult_(state, false);
     }
   }
@@ -142,11 +189,13 @@ function processUpdateBatch_() {
 
   while (state.definitionIndex < definitions.length && !batchLimitReached_(started, operations)) {
     const definition = definitions[state.definitionIndex];
-    insertRecurringCalendarEvent_(
+    const eventConfirmed = insertRecurringCalendarEvent_(
       state.calendarId,
       definition,
-      deterministicEventId_(state.spreadsheetId, definition)
+      deterministicEventId_(state.spreadsheetId, state.runId, definition),
+      state.runId
     );
+    if (!eventConfirmed) throw new Error(`Não foi possível confirmar a criação da linha ${definition.sourceRow}.`);
     state.definitionIndex += 1;
     state.created += 1;
     operations += 1;
@@ -154,13 +203,18 @@ function processUpdateBatch_() {
     saveUpdateState_(state);
   }
 
+  console.log(
+    `[AgendaCalendar] runId=${state.runId} fase=creating definitionIndex=${state.definitionIndex} ` +
+    `criados=${state.created}/${state.total}`
+  );
+
   if (state.definitionIndex >= definitions.length) {
     finishUpdate_(state, spreadsheet);
     return updateResult_(state, true);
   }
 
   saveUpdateState_(state);
-  scheduleUpdateContinuation_();
+  scheduleUpdateContinuation_(null, state);
   return updateResult_(state, false);
 }
 
@@ -313,20 +367,44 @@ function createCalendarPdf_(entriesByDay, month, year) {
 
 function deleteCalendarEventsBatch_(calendarId, started) {
   let deleted = 0;
+  let pageToken;
+
   while (!batchLimitReached_(started, deleted)) {
-    const response = Calendar.Events.list(calendarId, {
-      maxResults: Math.min(AGENDA_CALENDAR.BATCH_SIZE - deleted, 100),
+    const options = {
+      maxResults: AGENDA_CALENDAR.BATCH_SIZE,
       showDeleted: false,
       singleEvents: false
-    });
+    };
+    if (pageToken) options.pageToken = pageToken;
+
+    const response = Calendar.Events.list(calendarId, options);
     const items = response.items || [];
-    if (!items.length) return -1;
+
+    // Nunca declarar a agenda vazia enquanto a API ainda indicar outra pagina.
+    // Ao encontrar eventos, remove somente este bloco e reinicia a listagem na
+    // proxima execucao, evitando reutilizar pageToken depois de mutar a colecao.
     for (let index = 0; index < items.length && !batchLimitReached_(started, deleted); index += 1) {
       removeCalendarEventSafely_(calendarId, items[index].id);
       deleted += 1;
     }
+
+    if (deleted > 0) return { deleted, empty: false };
+    pageToken = response.nextPageToken;
+    if (!pageToken) return { deleted: 0, empty: true };
   }
-  return deleted;
+  return { deleted, empty: false };
+}
+
+function calendarHasAnyEvent_(calendarId) {
+  let pageToken;
+  do {
+    const options = { maxResults: 1, showDeleted: false, singleEvents: false };
+    if (pageToken) options.pageToken = pageToken;
+    const response = Calendar.Events.list(calendarId, options);
+    if (response.items && response.items.length) return true;
+    pageToken = response.nextPageToken;
+  } while (pageToken);
+  return false;
 }
 
 function removeCalendarEventSafely_(calendarId, eventId) {
@@ -339,7 +417,8 @@ function removeCalendarEventSafely_(calendarId, eventId) {
   }
 }
 
-function insertRecurringCalendarEvent_(calendarId, definition, eventId) {
+function insertRecurringCalendarEvent_(calendarId, definition, eventId, runId) {
+  const definitionHash = eventDefinitionHash_(definition);
   try {
     Calendar.Events.insert({
       id: eventId,
@@ -348,12 +427,27 @@ function insertRecurringCalendarEvent_(calendarId, definition, eventId) {
       start: { date: calendarDate_(definition.startDate) },
       end: { date: calendarDate_(addDays_(definition.startDate, 1)) },
       recurrence: recurrenceDates_(definition.startDate, definition.recurrence),
-      extendedProperties: { private: { managedBy: 'AgendaCalendar' } }
+      extendedProperties: {
+        private: {
+          managedBy: 'AgendaCalendar',
+          runId,
+          sourceRow: String(definition.sourceRow),
+          definitionHash
+        }
+      }
     }, calendarId);
+    return true;
   } catch (error) {
-    // IDs deterministas tornam a criacao idempotente. Se um timeout ocorrer
-    // depois da API criar o evento, a repeticao recebe 409 e pode seguir adiante.
     if (!calendarErrorHasCode_(error, [409])) throw error;
+    const existing = Calendar.Events.get(calendarId, eventId);
+    if (!eventMatchesCurrentRun_(existing, definition, runId, definitionHash)) {
+      throw new Error(`Conflito 409 não idempotente ao criar a linha ${definition.sourceRow}.`);
+    }
+    console.log(
+      `[AgendaCalendar] runId=${runId} 409 validado como repetição legítima ` +
+      `sourceRow=${definition.sourceRow}`
+    );
+    return true;
   }
 }
 
@@ -364,8 +458,8 @@ function recurrenceDates_(startDate, recurrence) {
   return additionalDates.length ? [`RDATE;VALUE=DATE:${additionalDates.join(',')}`] : [];
 }
 
-function deterministicEventId_(spreadsheetId, definition) {
-  const input = [spreadsheetId, definition.sourceRow].join('|');
+function deterministicEventId_(spreadsheetId, runId, definition) {
+  const input = [spreadsheetId, runId, definition.sourceRow].join('|');
   const bytes = Utilities.computeDigest(
     Utilities.DigestAlgorithm.SHA_256,
     input,
@@ -373,6 +467,39 @@ function deterministicEventId_(spreadsheetId, definition) {
   );
   const hex = bytes.map((byte) => (`0${((byte + 256) % 256).toString(16)}`).slice(-2)).join('');
   return `a${hex}`;
+}
+
+function eventDefinitionHash_(definition) {
+  const normalized = {
+    sourceRow: definition.sourceRow,
+    summary: buildEventTitle_(definition.title, definition.detail),
+    description: definition.description,
+    start: calendarDate_(definition.startDate),
+    end: calendarDate_(addDays_(definition.startDate, 1)),
+    recurrence: recurrenceDates_(definition.startDate, definition.recurrence)
+  };
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    JSON.stringify(normalized),
+    Utilities.Charset.UTF_8
+  );
+  return Utilities.base64EncodeWebSafe(bytes);
+}
+
+function eventMatchesCurrentRun_(event, definition, runId, definitionHash) {
+  if (!event || event.status === 'cancelled') return false;
+  const privateProperties = event.extendedProperties && event.extendedProperties.private;
+  if (!privateProperties || privateProperties.managedBy !== 'AgendaCalendar' ||
+      privateProperties.runId !== runId ||
+      privateProperties.sourceRow !== String(definition.sourceRow) ||
+      privateProperties.definitionHash !== definitionHash) return false;
+
+  return event.summary === buildEventTitle_(definition.title, definition.detail) &&
+    String(event.description || '') === String(definition.description || '') &&
+    event.start && event.start.date === calendarDate_(definition.startDate) &&
+    event.end && event.end.date === calendarDate_(addDays_(definition.startDate, 1)) &&
+    JSON.stringify(event.recurrence || []) ===
+      JSON.stringify(recurrenceDates_(definition.startDate, definition.recurrence));
 }
 
 function definitionsSignature_(definitions) {
@@ -409,8 +536,13 @@ function updateResult_(state, complete) {
 function finishUpdate_(state, spreadsheet) {
   state.phase = 'complete';
   state.completedAt = new Date().toISOString();
-  saveUpdateState_(state);
   cancelUpdateTriggers_();
+  state.continuationTriggerId = null;
+  saveUpdateState_(state);
+  console.log(
+    `[AgendaCalendar] runId=${state.runId} fase=complete totalExcluído=${state.deleted || 0} ` +
+    `criados=${state.created}`
+  );
   spreadsheet.toast(`Atualização concluída: ${state.created} eventos criados.`, 'Agenda', 10);
 }
 
@@ -434,12 +566,14 @@ function saveUpdateState_(state) {
   );
 }
 
-function scheduleUpdateContinuation_(delayMilliseconds) {
+function scheduleUpdateContinuation_(delayMilliseconds, state) {
   cancelUpdateTriggers_();
-  ScriptApp.newTrigger(AGENDA_CALENDAR.UPDATE_HANDLER)
+  const trigger = ScriptApp.newTrigger(AGENDA_CALENDAR.UPDATE_HANDLER)
     .timeBased()
     .after(delayMilliseconds || 60 * 1000)
     .create();
+  state.continuationTriggerId = trigger.getUniqueId();
+  saveUpdateState_(state);
 }
 
 function cancelUpdateTriggers_() {
