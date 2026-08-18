@@ -64,6 +64,17 @@ atualização estiver ativa, outro clique ou outro usuário não poderá iniciar
 segunda atualização concorrente. Isso evita que um processo apague os eventos que o
 outro acabou de criar. Aguarde a mensagem de conclusão antes de iniciar novamente.
 
+O identificador recebido no callback do gatilho é usado apenas para diagnóstico. A
+continuação é controlada pelo bloqueio e pelo estado ativo, evitando que diferenças
+entre representações numéricas e textuais de `triggerUid` interrompam um lote válido.
+Um estado ativo sem gatilho, ou sem atualização por mais de 15 minutos, é considerado
+órfão e não bloqueia uma nova sincronização.
+
+Se for necessário interromper administrativamente um fluxo, use **Agenda > Cancelar
+atualização travada**. Essa opção cancela os gatilhos e marca o estado como cancelado,
+mas não exclui nem cria eventos. Depois dela, **Atualizar agenda** pode ser iniciado
+novamente.
+
 Não altere, insira ou remova linhas de `TAREFAS` enquanto uma atualização estiver
 em andamento. Se isso acontecer, o processo é interrompido para evitar uma agenda
 parcial; depois das alterações, execute **Atualizar agenda** novamente.

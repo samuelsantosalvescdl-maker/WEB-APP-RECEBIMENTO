@@ -13,12 +13,13 @@ const AGENDA_CALENDAR = Object.freeze({
   TASKS_RANGE: 'TAREFAS',
   MONTH_RANGE: 'MÊS',
   YEARS_TO_CREATE: 2,
-  UPDATE_STATE_VERSION: 4,
+  UPDATE_STATE_VERSION: 5,
   UPDATE_HANDLER: 'continuarAtualizacaoAgenda',
   UPDATE_STATE_PROPERTY: 'AGENDA_CALENDAR_UPDATE_STATE',
   BATCH_SIZE: 10,
   MAX_BATCH_MILLISECONDS: 60000,
   SAFETY_TRIGGER_DELAY_MILLISECONDS: 7 * 60 * 1000,
+  STALE_UPDATE_MILLISECONDS: 15 * 60 * 1000,
   EMPTY_CALENDAR_CONFIRMATIONS: 3,
   PDF_FOLDER_NAME: 'Calendários de tarefas',
   WEEKDAYS: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'],
@@ -34,6 +35,8 @@ function onOpen() {
     .createMenu(AGENDA_CALENDAR.MENU)
     .addItem('Atualizar agenda', 'atualizarAgenda')
     .addItem('Gerar PDF', 'gerarPDF')
+    .addSeparator()
+    .addItem('Cancelar atualização travada', 'cancelarAtualizacaoTravada')
     .addToUi();
 }
 
@@ -46,8 +49,24 @@ function atualizarAgenda() {
   try {
     if (!lock.tryLock(5000)) throw new Error('Já existe uma atualização da agenda em execução. Aguarde.');
     const previousState = loadUpdateState_();
-    if (isUpdateActive_(previousState)) {
-      throw new Error('Já existe uma atualização em andamento. Aguarde a mensagem de conclusão.');
+    if (previousState && previousState.version !== AGENDA_CALENDAR.UPDATE_STATE_VERSION) {
+      console.log(
+        `[AgendaCalendar] runId=${previousState.runId || 'desconhecido'} estado da versão ` +
+        `${previousState.version || 'desconhecida'} invalidado pela versão ${AGENDA_CALENDAR.UPDATE_STATE_VERSION}`
+      );
+      invalidatePreviousUpdate_(previousState, 'stale', 'Estado incompatível com a versão atual.');
+    } else if (isUpdateActive_(previousState)) {
+      const hasTrigger = hasUpdateContinuationTrigger_();
+      const stale = isUpdateStale_(previousState);
+      if (hasTrigger && !stale) {
+        throw new Error('Já existe uma atualização em andamento. Aguarde a mensagem de conclusão.');
+      }
+      console.warn(
+        `[AgendaCalendar] runId=${previousState.runId} atualização órfã detectada ` +
+        `phase=${previousState.phase} hasTrigger=${hasTrigger} stale=${stale} ` +
+        `definitionIndex=${previousState.definitionIndex || 0} created=${previousState.created || 0}`
+      );
+      invalidatePreviousUpdate_(previousState, 'stale', 'Atualização órfã ou sem progresso detectada.');
     }
     const spreadsheet = SpreadsheetApp.getActive();
     const calendarId = namedCellValue_(spreadsheet, AGENDA_CALENDAR.ID_RANGE);
@@ -104,16 +123,31 @@ function atualizarAgenda() {
 
 /** Continua uma atualizacao iniciada por atualizarAgenda (acionada por gatilho). */
 function continuarAtualizacaoAgenda(event) {
-  const expectedState = loadUpdateState_();
-  if (event && event.triggerUid && expectedState && expectedState.continuationTriggerId &&
-      event.triggerUid !== expectedState.continuationTriggerId) {
-    console.log(`[AgendaCalendar] runId=${expectedState.runId} gatilho obsoleto ignorado`);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    console.log(
+      `[AgendaCalendar] callback não obteve lock; outro lote permanece responsável pela continuação ` +
+      `triggerUid=${event && event.triggerUid !== undefined ? event.triggerUid : 'ausente'} ` +
+      `triggerUidType=${event && event.triggerUid !== undefined ? typeof event.triggerUid : 'undefined'}`
+    );
     return;
   }
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(1000)) return;
 
   try {
+    const state = loadUpdateState_();
+    if (!state || state.version !== AGENDA_CALENDAR.UPDATE_STATE_VERSION ||
+        !['deleting', 'creating'].includes(state.phase)) {
+      console.log('[AgendaCalendar] callback sem atualização ativa; encerrando normalmente');
+      cancelUpdateTriggers_();
+      return;
+    }
+    console.log(
+      `[AgendaCalendar] runId=${state.runId} phase=${state.phase} ` +
+      `definitionIndex=${state.definitionIndex || 0} created=${state.created || 0} ` +
+      `deleted=${state.deleted || 0} ` +
+      `triggerUid=${event && event.triggerUid !== undefined ? event.triggerUid : 'ausente'} ` +
+      `triggerUidType=${event && event.triggerUid !== undefined ? typeof event.triggerUid : 'undefined'}`
+    );
     processUpdateBatch_();
   } catch (error) {
     cancelUpdateTriggers_();
@@ -137,6 +171,38 @@ function continuarAtualizacaoAgenda(event) {
     throw error;
   } finally {
     lock.releaseLock();
+  }
+}
+
+/** Cancela somente o fluxo de sincronizacao; nao altera nenhum evento da agenda. */
+function cancelarAtualizacaoTravada() {
+  const ui = SpreadsheetApp.getUi();
+  const lock = LockService.getScriptLock();
+
+  try {
+    if (!lock.tryLock(5000)) {
+      throw new Error('Existe um lote em execução neste momento. Aguarde alguns segundos e tente novamente.');
+    }
+    cancelUpdateTriggers_();
+    const state = loadUpdateState_();
+    if (state) {
+      state.phase = 'cancelled';
+      state.error = 'Atualização cancelada manualmente pelo usuário.';
+      state.cancelledAt = new Date().toISOString();
+      state.continuationTriggerId = null;
+      saveUpdateState_(state);
+      console.warn(`[AgendaCalendar] runId=${state.runId || 'desconhecido'} fase=cancelled`);
+    }
+    ui.alert(
+      'Atualização cancelada',
+      'Somente o processo de sincronização foi cancelado. Nenhum evento foi excluído ou criado por esta ação.',
+      ui.ButtonSet.OK
+    );
+  } catch (error) {
+    ui.alert('Não foi possível cancelar', error.message || String(error), ui.ButtonSet.OK);
+    throw error;
+  } finally {
+    if (lock.hasLock()) lock.releaseLock();
   }
 }
 
@@ -170,7 +236,11 @@ function processUpdateBatch_() {
       } else {
         state.phase = 'creating';
         operations = 0;
-        console.log(`[AgendaCalendar] runId=${state.runId} agenda confirmada vazia; fase=creating`);
+        state.creatingStartedAt = new Date().toISOString();
+        console.log(
+          `[AgendaCalendar] runId=${state.runId} AGENDA CONFIRMADA VAZIA; ` +
+          'alterando phase deleting -> creating'
+        );
       }
     }
 
@@ -189,6 +259,12 @@ function processUpdateBatch_() {
 
   while (state.definitionIndex < definitions.length && !batchLimitReached_(started, operations)) {
     const definition = definitions[state.definitionIndex];
+    if (state.definitionIndex === 0 && state.created === 0) {
+      console.log(
+        `[AgendaCalendar] runId=${state.runId} INICIANDO PRIMEIRO EVENTO ` +
+        `definitionIndex=0 sourceRow=${definition.sourceRow}`
+      );
+    }
     const eventConfirmed = insertRecurringCalendarEvent_(
       state.calendarId,
       definition,
@@ -201,6 +277,10 @@ function processUpdateBatch_() {
     operations += 1;
     // Persistir apos cada evento torna a retomada segura mesmo em timeout.
     saveUpdateState_(state);
+    console.log(
+      `[AgendaCalendar] runId=${state.runId} EVENTO CONFIRMADO ` +
+      `definitionIndex=${state.definitionIndex} created=${state.created}`
+    );
   }
 
   console.log(
@@ -554,8 +634,34 @@ function loadUpdateState_() {
 function isUpdateActive_(state) {
   if (!state || state.version !== AGENDA_CALENDAR.UPDATE_STATE_VERSION ||
       !['deleting', 'creating'].includes(state.phase)) return false;
+  return true;
+}
+
+function isUpdateStale_(state) {
+  if (!state) return false;
   const lastUpdate = new Date(state.updatedAt || state.startedAt || 0).getTime();
-  return Date.now() - lastUpdate < 24 * 60 * 60 * 1000;
+  const stale = !Number.isFinite(lastUpdate) ||
+    Date.now() - lastUpdate > AGENDA_CALENDAR.STALE_UPDATE_MILLISECONDS;
+  const creatingWithoutProgress = state.phase === 'creating' &&
+    Number(state.definitionIndex || 0) === 0 && Number(state.created || 0) === 0 && stale;
+  if (creatingWithoutProgress) {
+    console.warn(`[AgendaCalendar] runId=${state.runId} creating sem progresso detectado`);
+  }
+  return stale;
+}
+
+function hasUpdateContinuationTrigger_() {
+  return ScriptApp.getProjectTriggers().some((trigger) =>
+    trigger.getHandlerFunction() === AGENDA_CALENDAR.UPDATE_HANDLER);
+}
+
+function invalidatePreviousUpdate_(state, phase, message) {
+  cancelUpdateTriggers_();
+  state.phase = phase;
+  state.error = message;
+  state.continuationTriggerId = null;
+  state.invalidatedAt = new Date().toISOString();
+  saveUpdateState_(state);
 }
 
 function saveUpdateState_(state) {
