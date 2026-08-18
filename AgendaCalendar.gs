@@ -13,11 +13,12 @@ const AGENDA_CALENDAR = Object.freeze({
   TASKS_RANGE: 'TAREFAS',
   MONTH_RANGE: 'MÊS',
   YEARS_TO_CREATE: 2,
-  UPDATE_STATE_VERSION: 2,
+  UPDATE_STATE_VERSION: 3,
   UPDATE_HANDLER: 'continuarAtualizacaoAgenda',
   UPDATE_STATE_PROPERTY: 'AGENDA_CALENDAR_UPDATE_STATE',
   BATCH_SIZE: 10,
   MAX_BATCH_MILLISECONDS: 60000,
+  EMPTY_CALENDAR_CONFIRMATIONS: 3,
   PDF_FOLDER_NAME: 'Calendários de tarefas',
   WEEKDAYS: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'],
   MONTHS: [
@@ -60,6 +61,8 @@ function atualizarAgenda() {
       calendarId: String(calendarId).trim(),
       phase: 'deleting',
       definitionIndex: 0,
+      deletionEmptyChecks: 0,
+      deleted: 0,
       created: 0,
       total: definitions.length,
       definitionsSignature: definitionsSignature_(definitions),
@@ -123,12 +126,24 @@ function processUpdateBatch_() {
   let operations = 0;
 
   if (state.phase === 'deleting') {
-    operations = deleteCalendarEventsBatch_(state.calendarId, started);
-    if (operations < 0) {
-      state.phase = 'creating';
-      operations = 0;
-    } else {
-      saveUpdateState_(state);
+    const deletion = deleteCalendarEventsBatch_(state.calendarId, started);
+    operations = deletion.deleted;
+    state.deleted = (state.deleted || 0) + deletion.deleted;
+    state.deletionEmptyChecks = deletion.empty ? (state.deletionEmptyChecks || 0) + 1 : 0;
+
+    if (state.deletionEmptyChecks >= AGENDA_CALENDAR.EMPTY_CALENDAR_CONFIRMATIONS) {
+      // Uma ultima leitura independente impede iniciar a criacao se a API voltar
+      // a apresentar um evento durante a janela de consistencia eventual.
+      if (calendarHasAnyEvent_(state.calendarId)) {
+        state.deletionEmptyChecks = 0;
+      } else {
+        state.phase = 'creating';
+        operations = 0;
+      }
+    }
+
+    saveUpdateState_(state);
+    if (state.phase === 'deleting') {
       scheduleUpdateContinuation_();
       return updateResult_(state, false);
     }
@@ -315,18 +330,29 @@ function deleteCalendarEventsBatch_(calendarId, started) {
   let deleted = 0;
   while (!batchLimitReached_(started, deleted)) {
     const response = Calendar.Events.list(calendarId, {
-      maxResults: Math.min(AGENDA_CALENDAR.BATCH_SIZE - deleted, 100),
+      // Uma pagina grande evita interpretar como vazia uma pagina intermediaria
+      // com poucos resultados. Apenas o limite do bloco e efetivamente removido.
+      maxResults: 2500,
       showDeleted: false,
       singleEvents: false
     });
     const items = response.items || [];
-    if (!items.length) return -1;
+    if (!items.length) return { deleted, empty: true };
     for (let index = 0; index < items.length && !batchLimitReached_(started, deleted); index += 1) {
       removeCalendarEventSafely_(calendarId, items[index].id);
       deleted += 1;
     }
   }
-  return deleted;
+  return { deleted, empty: false };
+}
+
+function calendarHasAnyEvent_(calendarId) {
+  const response = Calendar.Events.list(calendarId, {
+    maxResults: 1,
+    showDeleted: false,
+    singleEvents: false
+  });
+  return Boolean(response.items && response.items.length);
 }
 
 function removeCalendarEventSafely_(calendarId, eventId) {
