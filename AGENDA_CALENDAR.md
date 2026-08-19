@@ -1,7 +1,8 @@
 # Agenda do Google Calendar gerenciada pela planilha
 
 O arquivo `AgendaCalendar.gs` adiciona o menu **Agenda** à planilha, com os comandos
-**Atualizar agenda** e **Gerar PDF**.
+**Atualizar agenda**, **Gerar PDF**, **Diagnosticar atualização** e **Cancelar
+atualização travada**.
 
 ## Intervalos nomeados
 
@@ -42,12 +43,17 @@ não cria uma cópia duplicada e não exige centenas de chamadas à API.
 A exclusão também tolera resultados antigos mantidos temporariamente pela API do
 Calendar. Uma notificação aparece na planilha quando todo o processo termina.
 
-A criação somente começa depois que a API retorna a agenda vazia em três execuções
-consecutivas e uma quarta consulta final também confirma que não existe nenhum evento.
+A criação somente começa depois que a API retorna a agenda sem eventos ativos em três execuções
+consecutivas e uma quarta consulta final também confirma que não existe nenhum evento ativo.
 A consulta não usa limite de data: eventos passados, futuros, avulsos e séries
 recorrentes são removidos. Essa confirmação adicional pode acrescentar alguns minutos
 à primeira sincronização, mas impede que a inserção comece sobre uma agenda que ainda
 contenha eventos antigos.
+
+Registros com `status=cancelled` são tombstones de eventos ou exceções recorrentes
+já removidas. Eles são percorridos pela paginação, mas não são removidos novamente e
+não impedem a agenda de ser considerada visualmente vazia. A listagem usa páginas de
+250 registros, separadas do limite de 10 exclusões reais por lote.
 
 Todas as listagens de exclusão e verificação percorrem `nextPageToken`, inclusive
 quando uma página intermediária não contém itens. Uma página vazia somente confirma o
@@ -67,13 +73,22 @@ outro acabou de criar. Aguarde a mensagem de conclusão antes de iniciar novamen
 O identificador recebido no callback do gatilho é usado apenas para diagnóstico. A
 continuação é controlada pelo bloqueio e pelo estado ativo, evitando que diferenças
 entre representações numéricas e textuais de `triggerUid` interrompam um lote válido.
-Um estado ativo sem gatilho, ou sem atualização por mais de 15 minutos, é considerado
+O estado diferencia `lastHeartbeatAt` (um callback executou) de `lastProgressAt`
+(houve exclusão real, confirmação vazia, transição, criação ou conclusão). Agendar
+um gatilho não renova o progresso. Um estado ativo sem seu gatilho correspondente, ou
+sem progresso real por mais de 15 minutos, é considerado
 órfão e não bloqueia uma nova sincronização.
 
 Se for necessário interromper administrativamente um fluxo, use **Agenda > Cancelar
 atualização travada**. Essa opção cancela os gatilhos e marca o estado como cancelado,
 mas não exclui nem cria eventos. Depois dela, **Atualizar agenda** pode ser iniciado
 novamente.
+
+Use **Agenda > Diagnosticar atualização** para consultar, sem alterar a agenda, o
+estado persistido, o gatilho correspondente, gatilhos residuais e as contagens de
+eventos ativos, cancelados, instâncias e mestres recorrentes. Um resumo aparece em um
+toast e os detalhes, inclusive uma amostra limitada de eventos, ficam nos logs de
+execução do Apps Script.
 
 Não altere, insira ou remova linhas de `TAREFAS` enquanto uma atualização estiver
 em andamento. Se isso acontecer, o processo é interrompido para evitar uma agenda
