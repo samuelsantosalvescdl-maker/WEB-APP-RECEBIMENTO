@@ -640,18 +640,29 @@ function calculateCalendarFontSize_(entriesByDay, numberOfWeeks, dayWidth, weekH
   if (totalTasks > 30 || maxTasksInDay > 5 || averageTitleLength > 32 || numberOfWeeks === 6) comfortableSize = 8;
   if (totalTasks > 60 || maxTasksInDay > 8 || averageTitleLength > 55) comfortableSize = 7;
 
-  for (let fontSize = comfortableSize; fontSize >= 0.5; fontSize -= 0.25) {
+  for (let fontSize = comfortableSize; fontSize >= 1; fontSize -= 0.25) {
     const fitsEveryDay = Object.keys(entriesByDay).every((day) =>
       estimatedTasksHeight_(entriesByDay[day], fontSize, contentWidth) <= contentHeight);
     if (fitsEveryDay) return fontSize;
   }
-  return 0.5;
+
+  // Casos excepcionalmente densos continuam reduzindo proporcionalmente. Como
+  // todo espaçamento das tarefas também depende da fonte, sempre existe um valor
+  // positivo que cabe no canvas fixo sem omitir conteúdo.
+  let fontSize = 0.9;
+  while (fontSize > 0.05) {
+    const fitsEveryDay = Object.keys(entriesByDay).every((day) =>
+      estimatedTasksHeight_(entriesByDay[day], fontSize, contentWidth) <= contentHeight);
+    if (fitsEveryDay) return fontSize;
+    fontSize *= 0.9;
+  }
+  return 0.05;
 }
 
 function estimatedTasksHeight_(tasks, fontSize, contentWidth) {
   return tasks.reduce((height, task) => {
     const lines = estimateWrappedLines_(task.title, fontSize, contentWidth);
-    return height + lines * fontSize * 1.15 + Math.max(1.2, fontSize * 0.3) + Math.max(0.7, fontSize * 0.18);
+    return height + lines * fontSize * 1.15 + fontSize * 0.38;
   }, 0);
 }
 
@@ -703,25 +714,33 @@ function hslToHex_(hue, saturation, lightness) {
 
 function calculateLegendLayout_(assignees, availableWidth) {
   if (!assignees.length) return { fontSize: 5, rows: [], height: 4 };
-  for (let fontSize = 7; fontSize >= 0.5; fontSize -= 0.5) {
+  for (let fontSize = 7; fontSize >= 1; fontSize -= 0.5) {
     const rows = packLegendRows_(assignees, availableWidth, fontSize);
     if (rows.length <= 2) return { fontSize, rows, height: rows.length * (fontSize + 5) + 2 };
   }
-  const fontSize = 0.5;
-  const rows = packLegendRows_(assignees, availableWidth, fontSize);
-  return { fontSize, rows, height: rows.length * (fontSize + 4) + 2 };
+  let fontSize = 0.9;
+  while (fontSize > 0.05) {
+    const rows = packLegendRows_(assignees, availableWidth, fontSize);
+    if (rows.length <= 2) return { fontSize, rows, height: rows.length * (fontSize + 4) + 2 };
+    fontSize *= 0.9;
+  }
+  const rows = packLegendRows_(assignees, availableWidth, 0.05);
+  return { fontSize: 0.05, rows, height: rows.length * 5.05 + 2 };
 }
 
 function packLegendRows_(assignees, availableWidth, fontSize) {
   const rows = [[]];
   let usedWidth = 0;
   assignees.forEach((assignee) => {
-    const width = 15 + assignee.length * fontSize * 0.56 + 10;
+    const markerWidth = Math.max(1, fontSize * 1.4);
+    const markerGap = Math.max(0.5, fontSize * 0.45);
+    const itemGap = Math.max(1, fontSize * 1.2);
+    const width = markerWidth + markerGap + assignee.length * fontSize * 0.56 + itemGap;
     if (usedWidth && usedWidth + width > availableWidth) {
       rows.push([]);
       usedWidth = 0;
     }
-    rows[rows.length - 1].push({ assignee, width });
+    rows[rows.length - 1].push({ assignee, width, markerWidth, markerGap });
     usedWidth += width;
   });
   return rows;
@@ -735,8 +754,10 @@ function drawAssigneeLegend_(slide, assignees, colorMap, left, top, width, layou
     const y = top + rowIndex * (layout.fontSize + 5) + 2;
     row.forEach((item) => {
       const lineY = y + layout.fontSize * 0.65;
-      insertSlideLine_(slide, x, lineY, x + 9, lineY, colorMap[item.assignee], 1.5);
-      insertSlideText_(slide, item.assignee, x + 12, y, item.width - 12,
+      insertSlideLine_(slide, x, lineY, x + item.markerWidth, lineY,
+        colorMap[item.assignee], Math.max(0.2, layout.fontSize * 0.2));
+      const textLeft = x + item.markerWidth + item.markerGap;
+      insertSlideText_(slide, item.assignee, textLeft, y, item.width - item.markerWidth - item.markerGap,
         layout.fontSize + 3, layout.fontSize, false, SlidesApp.ParagraphAlignment.START);
       x += item.width;
     });
@@ -779,11 +800,11 @@ function drawCalendarDay_(slide, day, tasks, colorMap, left, top, width, height,
     const textHeight = lineCount * fontSize * 1.15;
     insertSlideText_(slide, task.title, left + padding, taskTop, contentWidth,
       textHeight, fontSize, false, SlidesApp.ParagraphAlignment.START);
-    const underlineY = taskTop + textHeight + Math.max(0.35, fontSize * 0.08);
-    const underlineWidth = Math.min(contentWidth, Math.max(5, task.title.length * fontSize * 0.46));
+    const underlineY = taskTop + textHeight + Math.max(0.05, fontSize * 0.08);
+    const underlineWidth = Math.min(contentWidth, Math.max(1, task.title.length * fontSize * 0.46));
     insertSlideLine_(slide, left + padding, underlineY, left + padding + underlineWidth,
-      underlineY, colorMap[task.assignee] || '#777777', Math.max(0.6, fontSize * 0.14));
-    taskTop = underlineY + Math.max(0.8, fontSize * 0.28);
+      underlineY, colorMap[task.assignee] || '#777777', Math.max(0.2, fontSize * 0.14));
+    taskTop = underlineY + Math.max(0.08, fontSize * 0.28);
   });
 }
 
