@@ -12,6 +12,7 @@ Crie estes intervalos na planilha:
 | --- | --- |
 | `ID` | Uma única célula com o ID da agenda do Google Calendar. |
 | `MÊS` | Uma única célula com um número de `1` a `12`. O PDF sempre usa o ano atual. |
+| `PDF_TEMPLATE_ID` | ID de uma apresentação Google Slides vazia configurada como A3 horizontal. |
 | `TAREFAS` | Um intervalo com pelo menos cinco colunas, no formato descrito abaixo. |
 
 As colunas de `TAREFAS` são:
@@ -115,16 +116,20 @@ que devam ser preservados. O usuário que executar o comando precisa ter permiss
 para alterar eventos nessa agenda; ele não precisa ser proprietário da planilha.
 
 Os PDFs são armazenados na pasta **Calendários de tarefas**, criada na raiz do
-Google Drive quando necessário. O calendário é desenhado em uma apresentação com
-exatamente um slide de dimensões fixas; por isso, o PDF resultante possui exatamente
-uma página. A apresentação temporária usada na conversão é enviada à lixeira depois
-que o PDF é criado, inclusive se a renderização ou a conversão falhar.
+Google Drive quando necessário. Configure uma apresentação vazia com página A3
+horizontal (420 × 297 mm), deixe pelo menos um slide e informe o ID do arquivo no
+intervalo nomeado `PDF_TEMPLATE_ID`. O script copia esse template, mantém e limpa
+exatamente um slide e nunca modifica o arquivo original. Por isso, o PDF resultante
+possui exatamente uma página. A cópia temporária usada na conversão é enviada à
+lixeira depois que o PDF é criado, inclusive se a renderização ou a conversão falhar.
 
 No PDF, a quarta coluna de `TAREFAS` é tratada como responsável. Cada responsável
 recebe uma cor consistente na legenda e no sublinhado de suas tarefas. Linhas sem
 responsável usam o marcador neutro **SEM RESPONSÁVEL**. As tarefas usam fonte fixa de
-8,5 pontos e uma única linha: títulos longos são abreviados visualmente com reticências,
-sem alterar os dados originais. Dias muito carregados são divididos em subcolunas para
-que cada tarefa continue representada sem reduzir a fonte do restante do calendário.
+8 pontos e uma única linha: títulos longos são abreviados visualmente com reticências,
+sem alterar os dados originais. Cada dia possui uma única coluna com no máximo dez
+linhas visuais. Quando houver mais de dez tarefas, são mostradas as nove primeiras e
+a última linha informa `+N tarefas`. O template é rejeitado com um erro detalhado se
+não tiver altura suficiente para as dez linhas, sem reduzir automaticamente a fonte.
 As cores são derivadas do nome normalizado do responsável, com resolução de colisões
 entre as pessoas presentes no mesmo PDF.

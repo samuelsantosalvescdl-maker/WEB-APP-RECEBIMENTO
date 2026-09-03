@@ -25,6 +25,7 @@ const AGENDA_CALENDAR = Object.freeze({
   SAFETY_TRIGGER_DELAY_MILLISECONDS: 7 * 60 * 1000,
   EMPTY_CALENDAR_CONFIRMATIONS: 3,
   PDF_FOLDER_NAME: 'Calendários de tarefas',
+  PDF_TEMPLATE_RANGE: 'PDF_TEMPLATE_ID',
   WEEKDAYS: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'],
   MONTHS: [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -34,15 +35,16 @@ const AGENDA_CALENDAR = Object.freeze({
 
 const PDF_CALENDAR = Object.freeze({
   TITLE_FONT_SIZE: 16,
-  LEGEND_FONT_SIZE: 7.5,
+  LEGEND_FONT_SIZE: 8,
   WEEKDAY_FONT_SIZE: 9,
   DAY_NUMBER_FONT_SIZE: 10.5,
-  TASK_FONT_SIZE: 8.5,
+  TASK_FONT_SIZE: 8,
+  MAX_VISIBLE_TASK_ROWS: 10,
   LEGEND_ROW_HEIGHT: 12,
-  TASK_TEXT_HEIGHT: 8.8,
-  TASK_UNDERLINE_GAP: 0.7,
+  TASK_TEXT_HEIGHT: 8.5,
+  TASK_UNDERLINE_GAP: 0.5,
   TASK_UNDERLINE_WEIGHT: 1,
-  TASK_ROW_GAP: 0.9,
+  TASK_ROW_GAP: 0.7,
   CELL_PADDING: 2,
   DAY_NUMBER_HEIGHT: 12.5,
   NEUTRAL_ASSIGNEE: 'SEM RESPONSÁVEL',
@@ -470,7 +472,8 @@ function gerarPDF() {
     const year = Number(Utilities.formatDate(new Date(), spreadsheet.getSpreadsheetTimeZone(), 'yyyy'));
     const definitions = readTaskDefinitions_(spreadsheet);
     const entriesByDay = calendarEntries_(definitions, month, year);
-    const pdfFile = createCalendarPdf_(entriesByDay, month, year);
+    const templateId = pdfTemplateId_(spreadsheet);
+    const pdfFile = createCalendarPdf_(entriesByDay, month, year, templateId);
 
     const safeUrl = escapeHtml_(pdfFile.getDownloadUrl());
     const html = HtmlService.createHtmlOutput(
@@ -485,6 +488,22 @@ function gerarPDF() {
     ui.alert('Não foi possível gerar o PDF', error.message || String(error), ui.ButtonSet.OK);
     throw error;
   }
+}
+
+function pdfTemplateId_(spreadsheet) {
+  const range = spreadsheet.getRangeByName(AGENDA_CALENDAR.PDF_TEMPLATE_RANGE);
+  if (!range || range.getNumRows() !== 1 || range.getNumColumns() !== 1) {
+    throw new Error(
+      'Configure o intervalo nomeado "PDF_TEMPLATE_ID" com o ID do template A3 horizontal.'
+    );
+  }
+  const templateId = range.getDisplayValue().trim();
+  if (!templateId) {
+    throw new Error(
+      'Configure o intervalo nomeado "PDF_TEMPLATE_ID" com o ID do template A3 horizontal.'
+    );
+  }
+  return templateId;
 }
 
 function readTaskDefinitions_(spreadsheet) {
@@ -588,12 +607,23 @@ function calendarEntries_(definitions, month, year) {
   return entries;
 }
 
-function createCalendarPdf_(entriesByDay, month, year) {
+function createCalendarPdf_(entriesByDay, month, year, templateId) {
   const title = `Calendário - ${AGENDA_CALENDAR.MONTHS[month - 1]} de ${year}`;
-  const presentation = SlidesApp.create(title);
-  const presentationFile = DriveApp.getFileById(presentation.getId());
+  let presentationFile;
   try {
+    let presentation;
+    try {
+      presentationFile = DriveApp.getFileById(templateId).makeCopy(`${title} - temporário`);
+      presentation = SlidesApp.openById(presentationFile.getId());
+    } catch (error) {
+      throw new Error(
+        `Não foi possível usar o template informado em PDF_TEMPLATE_ID. ` +
+        `Confirme se o ID pertence a uma apresentação e se há permissão de acesso. ` +
+        `Detalhes: ${error.message || String(error)}`
+      );
+    }
     const slides = presentation.getSlides();
+    if (!slides.length) throw new Error('O template de PDF precisa conter pelo menos um slide em branco.');
     const slide = slides[0];
     for (let index = slides.length - 1; index > 0; index -= 1) slides[index].remove();
     slide.getPageElements().forEach((element) => element.remove());
@@ -601,6 +631,13 @@ function createCalendarPdf_(entriesByDay, month, year) {
 
     const pageWidth = presentation.getPageWidth();
     const pageHeight = presentation.getPageHeight();
+    console.log(`[AgendaCalendar] PDF template pageWidth=${pageWidth} pageHeight=${pageHeight}`);
+    if (pageWidth <= pageHeight) {
+      throw new Error(
+        `O template informado em PDF_TEMPLATE_ID deve estar em orientação horizontal. ` +
+        `pageWidth=${pageWidth}, pageHeight=${pageHeight}.`
+      );
+    }
     const firstWeekday = new Date(year, month - 1, 1).getDay();
     const daysInMonth = new Date(year, month, 0).getDate();
     const numberOfWeeks = Math.ceil((firstWeekday + daysInMonth) / 7);
@@ -621,6 +658,7 @@ function createCalendarPdf_(entriesByDay, month, year) {
     const weekHeight = (calendarHeight - headerHeight) / numberOfWeeks;
     const dayWidth = calendarWidth / 7;
     const taskFontSize = calculateCalendarFontSize_();
+    validatePdfTemplateLayout_(pageWidth, pageHeight, weekHeight, dayWidth);
 
     insertSlideText_(slide, `Calendário — ${AGENDA_CALENDAR.MONTHS[month - 1]} de ${year}`,
       margin, margin, calendarWidth, titleHeight, PDF_CALENDAR.TITLE_FONT_SIZE,
@@ -638,7 +676,7 @@ function createCalendarPdf_(entriesByDay, month, year) {
     const pdf = presentationFile.getAs(MimeType.PDF).setName(`${title}.pdf`);
     return getOrCreateFolder_(AGENDA_CALENDAR.PDF_FOLDER_NAME).createFile(pdf);
   } finally {
-    presentationFile.setTrashed(true);
+    if (presentationFile) presentationFile.setTrashed(true);
   }
 }
 
@@ -804,17 +842,28 @@ function drawCalendarDay_(slide, day, tasks, colorMap, left, top, width, height,
   insertSlideText_(slide, String(day), left + padding, top + 1, width - padding * 2,
     dayNumberHeight, PDF_CALENDAR.DAY_NUMBER_FONT_SIZE, true, SlidesApp.ParagraphAlignment.START);
 
-  const layout = calculateDayTaskLayout_(tasks.length, width, height);
-  tasks.forEach((task, index) => {
-    const column = Math.floor(index / layout.maxRows);
-    const row = index % layout.maxRows;
-    const taskLeft = left + padding + column * (layout.columnWidth + layout.columnGap);
+  const layout = calculateDayTaskLayout_(width, height);
+  const visibleRows = visibleDayTaskRows_(tasks);
+  visibleRows.forEach((rowItem, row) => {
+    const taskLeft = left + padding;
     const taskTop = top + dayNumberHeight + row * layout.taskRowHeight;
-    const displayTitle = truncateTaskTitleToWidth_(task.title, layout.columnWidth, fontSize);
-    insertSlideText_(slide, noWrapText_(displayTitle), taskLeft, taskTop, layout.columnWidth,
+    const rowBottom = taskTop + PDF_CALENDAR.TASK_TEXT_HEIGHT +
+      (rowItem.overflowCount ? 0 : PDF_CALENDAR.TASK_UNDERLINE_GAP) + PDF_CALENDAR.TASK_ROW_GAP;
+    if (rowBottom > top + height) {
+      throw new Error(`Overflow ao desenhar as tarefas do dia ${day}.`);
+    }
+    if (rowItem.overflowCount) {
+      insertSlideText_(slide, `+${rowItem.overflowCount} tarefas`, taskLeft, taskTop,
+        layout.contentWidth, PDF_CALENDAR.TASK_TEXT_HEIGHT, fontSize, true,
+        SlidesApp.ParagraphAlignment.START);
+      return;
+    }
+    const task = rowItem.task;
+    const displayTitle = truncateTaskTitleToWidth_(task.title, layout.contentWidth, fontSize);
+    insertSlideText_(slide, noWrapText_(displayTitle), taskLeft, taskTop, layout.contentWidth,
       PDF_CALENDAR.TASK_TEXT_HEIGHT, fontSize, false, SlidesApp.ParagraphAlignment.START);
     const underlineY = taskTop + PDF_CALENDAR.TASK_TEXT_HEIGHT + PDF_CALENDAR.TASK_UNDERLINE_GAP;
-    const underlineWidth = Math.min(layout.columnWidth,
+    const underlineWidth = Math.min(layout.contentWidth,
       Math.max(1, estimateSingleLineTextWidth_(displayTitle, fontSize)));
     insertSlideLine_(slide, taskLeft, underlineY, taskLeft + underlineWidth, underlineY,
       colorMap[task.assigneeKey || normalizeAssigneeKey_(task.assignee)] || PDF_CALENDAR.NEUTRAL_COLOR,
@@ -822,18 +871,41 @@ function drawCalendarDay_(slide, day, tasks, colorMap, left, top, width, height,
   });
 }
 
-function calculateDayTaskLayout_(taskCount, cellWidth, cellHeight) {
+function calculateDayTaskLayout_(cellWidth, cellHeight) {
   const contentWidth = Math.max(1, cellWidth - PDF_CALENDAR.CELL_PADDING * 2);
   const taskRowHeight = PDF_CALENDAR.TASK_TEXT_HEIGHT + PDF_CALENDAR.TASK_UNDERLINE_GAP +
     PDF_CALENDAR.TASK_ROW_GAP;
-  const availableTaskHeight = Math.max(taskRowHeight,
-    cellHeight - PDF_CALENDAR.DAY_NUMBER_HEIGHT - PDF_CALENDAR.CELL_PADDING);
-  const maxRows = Math.max(1, Math.floor(availableTaskHeight / taskRowHeight));
-  const internalColumns = Math.max(1, Math.ceil(taskCount / maxRows));
-  const columnGap = internalColumns > 1 ? Math.min(1.5, contentWidth / (internalColumns * 4)) : 0;
-  const columnWidth = Math.max(1,
-    (contentWidth - columnGap * (internalColumns - 1)) / internalColumns);
-  return { maxRows, internalColumns, columnGap, columnWidth, taskRowHeight, availableTaskHeight };
+  const availableTaskHeight = cellHeight - PDF_CALENDAR.DAY_NUMBER_HEIGHT - PDF_CALENDAR.CELL_PADDING;
+  const requiredHeight = PDF_CALENDAR.MAX_VISIBLE_TASK_ROWS * taskRowHeight;
+  return {
+    taskRowHeight,
+    maxVisibleRows: PDF_CALENDAR.MAX_VISIBLE_TASK_ROWS,
+    availableTaskHeight,
+    requiredHeight,
+    contentWidth
+  };
+}
+
+function visibleDayTaskRows_(tasks) {
+  if (tasks.length <= PDF_CALENDAR.MAX_VISIBLE_TASK_ROWS) {
+    return tasks.map((task) => ({ task }));
+  }
+  const taskRows = tasks.slice(0, PDF_CALENDAR.MAX_VISIBLE_TASK_ROWS - 1)
+    .map((task) => ({ task }));
+  taskRows.push({ overflowCount: tasks.length - (PDF_CALENDAR.MAX_VISIBLE_TASK_ROWS - 1) });
+  return taskRows;
+}
+
+function validatePdfTemplateLayout_(pageWidth, pageHeight, weekHeight, dayWidth) {
+  const layout = calculateDayTaskLayout_(dayWidth, weekHeight);
+  if (layout.availableTaskHeight + 0.001 < layout.requiredHeight) {
+    throw new Error(
+      `O template do PDF não possui altura suficiente para ${PDF_CALENDAR.MAX_VISIBLE_TASK_ROWS} ` +
+      `tarefas por dia com fonte de ${PDF_CALENDAR.TASK_FONT_SIZE} pt. ` +
+      `pageWidth=${pageWidth}, pageHeight=${pageHeight}, weekHeight=${weekHeight}, ` +
+      `availableTaskHeight=${layout.availableTaskHeight}, requiredHeight=${layout.requiredHeight}.`
+    );
+  }
 }
 
 function truncateTaskTitleToWidth_(text, availableWidth, fontSize) {
