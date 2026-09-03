@@ -32,6 +32,23 @@ const AGENDA_CALENDAR = Object.freeze({
   ]
 });
 
+const PDF_CALENDAR = Object.freeze({
+  TITLE_FONT_SIZE: 16,
+  LEGEND_FONT_SIZE: 7.5,
+  WEEKDAY_FONT_SIZE: 9,
+  DAY_NUMBER_FONT_SIZE: 10.5,
+  TASK_FONT_SIZE: 8.5,
+  LEGEND_ROW_HEIGHT: 12,
+  TASK_TEXT_HEIGHT: 8.8,
+  TASK_UNDERLINE_GAP: 0.7,
+  TASK_UNDERLINE_WEIGHT: 1,
+  TASK_ROW_GAP: 0.9,
+  CELL_PADDING: 2,
+  DAY_NUMBER_HEIGHT: 12.5,
+  NEUTRAL_ASSIGNEE: 'SEM RESPONSÁVEL',
+  NEUTRAL_COLOR: '#777777'
+});
+
 /** Cria os comandos no topo da planilha sempre que ela for aberta. */
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -560,9 +577,11 @@ function calendarEntries_(definitions, month, year) {
       const day = date.getDate();
       if (!entries[day]) entries[day] = [];
       const assignee = String(definition.detail || '').trim();
+      const displayedAssignee = assignee || PDF_CALENDAR.NEUTRAL_ASSIGNEE;
       entries[day].push({
         title: definition.title,
-        assignee: assignee || 'SEM RESPONSÁVEL'
+        assignee: displayedAssignee,
+        assigneeKey: normalizeAssigneeKey_(displayedAssignee)
       });
     });
   });
@@ -585,8 +604,9 @@ function createCalendarPdf_(entriesByDay, month, year) {
     const firstWeekday = new Date(year, month - 1, 1).getDay();
     const daysInMonth = new Date(year, month, 0).getDate();
     const numberOfWeeks = Math.ceil((firstWeekday + daysInMonth) / 7);
+    const assigneeLabels = createAssigneeLabelMap_(entriesByDay);
     const assigneeColorMap = createAssigneeColorMap_(entriesByDay);
-    const assignees = Object.keys(assigneeColorMap);
+    const assignees = Object.keys(assigneeLabels).map((key) => ({ key, label: assigneeLabels[key] }));
 
     const margin = 18;
     const titleHeight = 24;
@@ -600,15 +620,11 @@ function createCalendarPdf_(entriesByDay, month, year) {
     const calendarHeight = pageHeight - calendarTop - bottomMargin;
     const weekHeight = (calendarHeight - headerHeight) / numberOfWeeks;
     const dayWidth = calendarWidth / 7;
-    const taskFontSize = calculateCalendarFontSize_(
-      entriesByDay,
-      numberOfWeeks,
-      dayWidth,
-      weekHeight
-    );
+    const taskFontSize = calculateCalendarFontSize_();
 
     insertSlideText_(slide, `Calendário — ${AGENDA_CALENDAR.MONTHS[month - 1]} de ${year}`,
-      margin, margin, calendarWidth, titleHeight, 16, true, SlidesApp.ParagraphAlignment.CENTER);
+      margin, margin, calendarWidth, titleHeight, PDF_CALENDAR.TITLE_FONT_SIZE,
+      true, SlidesApp.ParagraphAlignment.CENTER);
     drawAssigneeLegend_(slide, assignees, assigneeColorMap, margin, margin + titleHeight,
       calendarWidth, legendLayout);
     drawCalendarGrid_(slide, entriesByDay, assigneeColorMap, firstWeekday, daysInMonth,
@@ -626,50 +642,8 @@ function createCalendarPdf_(entriesByDay, month, year) {
   }
 }
 
-function calculateCalendarFontSize_(entriesByDay, numberOfWeeks, dayWidth, weekHeight) {
-  const allTasks = Object.keys(entriesByDay).reduce((tasks, day) => tasks.concat(entriesByDay[day]), []);
-  const totalTasks = allTasks.length;
-  const maxTasksInDay = Object.keys(entriesByDay).reduce((maximum, day) =>
-    Math.max(maximum, entriesByDay[day].length), 0);
-  const averageTitleLength = totalTasks
-    ? allTasks.reduce((total, task) => total + task.title.length, 0) / totalTasks
-    : 0;
-  const contentWidth = dayWidth - 8;
-  const contentHeight = weekHeight - 16;
-  let comfortableSize = 9;
-  if (totalTasks > 30 || maxTasksInDay > 5 || averageTitleLength > 32 || numberOfWeeks === 6) comfortableSize = 8;
-  if (totalTasks > 60 || maxTasksInDay > 8 || averageTitleLength > 55) comfortableSize = 7;
-
-  for (let fontSize = comfortableSize; fontSize >= 1; fontSize -= 0.25) {
-    const fitsEveryDay = Object.keys(entriesByDay).every((day) =>
-      estimatedTasksHeight_(entriesByDay[day], fontSize, contentWidth) <= contentHeight);
-    if (fitsEveryDay) return fontSize;
-  }
-
-  // Casos excepcionalmente densos continuam reduzindo proporcionalmente. Como
-  // todo espaçamento das tarefas também depende da fonte, sempre existe um valor
-  // positivo que cabe no canvas fixo sem omitir conteúdo.
-  let fontSize = 0.9;
-  while (fontSize > 0.05) {
-    const fitsEveryDay = Object.keys(entriesByDay).every((day) =>
-      estimatedTasksHeight_(entriesByDay[day], fontSize, contentWidth) <= contentHeight);
-    if (fitsEveryDay) return fontSize;
-    fontSize *= 0.9;
-  }
-  return 0.05;
-}
-
-function estimatedTasksHeight_(tasks, fontSize, contentWidth) {
-  return tasks.reduce((height, task) => {
-    const lines = estimateWrappedLines_(task.title, fontSize, contentWidth);
-    return height + lines * fontSize * 1.15 + fontSize * 0.38;
-  }, 0);
-}
-
-function estimateWrappedLines_(text, fontSize, contentWidth) {
-  const charactersPerLine = Math.max(1, Math.floor(contentWidth / (fontSize * 0.58)));
-  return String(text || '').split(/\n/).reduce((lines, paragraph) =>
-    lines + Math.max(1, Math.ceil(paragraph.length / charactersPerLine)), 0);
+function calculateCalendarFontSize_() {
+  return PDF_CALENDAR.TASK_FONT_SIZE;
 }
 
 function createAssigneeColorMap_(entriesByDay) {
@@ -677,23 +651,60 @@ function createAssigneeColorMap_(entriesByDay) {
     '#2563EB', '#DC2626', '#059669', '#7C3AED', '#D97706', '#0891B2', '#DB2777', '#4F46E5',
     '#65A30D', '#C2410C', '#0F766E', '#9333EA', '#0369A1', '#BE123C', '#4D7C0F', '#A16207'
   ];
+  const labels = createAssigneeLabelMap_(entriesByDay);
   const map = {};
-  Object.keys(entriesByDay).forEach((day) => {
-    entriesByDay[day].forEach((task) => {
-      const assignee = String(task.assignee || '').trim() || 'SEM RESPONSÁVEL';
-      if (map[assignee]) return;
-      const index = Object.keys(map).length;
-      map[assignee] = assignee === 'SEM RESPONSÁVEL'
-        ? '#777777'
-        : (palette[index] || extendedAssigneeColor_(index));
-    });
+  const usedColors = {};
+  Object.keys(labels).sort().forEach((key) => {
+    if (key === normalizeAssigneeKey_(PDF_CALENDAR.NEUTRAL_ASSIGNEE)) {
+      map[key] = PDF_CALENDAR.NEUTRAL_COLOR;
+      return;
+    }
+    const initialIndex = stableTextHash_(key) % palette.length;
+    let color;
+    for (let offset = 0; offset < palette.length; offset += 1) {
+      const candidate = palette[(initialIndex + offset) % palette.length];
+      if (!usedColors[candidate]) {
+        color = candidate;
+        break;
+      }
+    }
+    let attempt = 0;
+    while (!color) {
+      const hue = (stableTextHash_(key) + attempt * 137.508) % 360;
+      const candidate = hslToHex_(hue, 58, 42);
+      if (!usedColors[candidate] && candidate !== PDF_CALENDAR.NEUTRAL_COLOR) color = candidate;
+      attempt += 1;
+    }
+    map[key] = color;
+    usedColors[color] = true;
   });
   return map;
 }
 
-function extendedAssigneeColor_(index) {
-  const hue = (index * 137.508) % 360;
-  return hslToHex_(hue, 58, 42);
+function createAssigneeLabelMap_(entriesByDay) {
+  const labels = {};
+  Object.keys(entriesByDay).forEach((day) => {
+    entriesByDay[day].forEach((task) => {
+      const label = String(task.assignee || '').trim() || PDF_CALENDAR.NEUTRAL_ASSIGNEE;
+      const key = task.assigneeKey || normalizeAssigneeKey_(label);
+      if (!labels[key]) labels[key] = label;
+    });
+  });
+  return labels;
+}
+
+function normalizeAssigneeKey_(value) {
+  const normalized = String(value || '').trim() || PDF_CALENDAR.NEUTRAL_ASSIGNEE;
+  return normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+}
+
+function stableTextHash_(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
 
 function hslToHex_(hue, saturation, lightness) {
@@ -713,36 +724,35 @@ function hslToHex_(hue, saturation, lightness) {
 }
 
 function calculateLegendLayout_(assignees, availableWidth) {
-  if (!assignees.length) return { fontSize: 5, rows: [], height: 4 };
-  for (let fontSize = 7; fontSize >= 1; fontSize -= 0.5) {
-    const rows = packLegendRows_(assignees, availableWidth, fontSize);
-    if (rows.length <= 2) return { fontSize, rows, height: rows.length * (fontSize + 5) + 2 };
-  }
-  let fontSize = 0.9;
-  while (fontSize > 0.05) {
-    const rows = packLegendRows_(assignees, availableWidth, fontSize);
-    if (rows.length <= 2) return { fontSize, rows, height: rows.length * (fontSize + 4) + 2 };
-    fontSize *= 0.9;
-  }
-  const rows = packLegendRows_(assignees, availableWidth, 0.05);
-  return { fontSize: 0.05, rows, height: rows.length * 5.05 + 2 };
+  if (!assignees.length) return { fontSize: PDF_CALENDAR.LEGEND_FONT_SIZE, rows: [], height: 4 };
+  const rowCount = assignees.length <= 6 ? 1 : 2;
+  const rows = packLegendRows_(assignees, availableWidth, rowCount);
+  return {
+    fontSize: PDF_CALENDAR.LEGEND_FONT_SIZE,
+    rows,
+    height: rows.length * PDF_CALENDAR.LEGEND_ROW_HEIGHT + 3
+  };
 }
 
-function packLegendRows_(assignees, availableWidth, fontSize) {
-  const rows = [[]];
-  let usedWidth = 0;
-  assignees.forEach((assignee) => {
-    const markerWidth = Math.max(1, fontSize * 1.4);
-    const markerGap = Math.max(0.5, fontSize * 0.45);
-    const itemGap = Math.max(1, fontSize * 1.2);
-    const width = markerWidth + markerGap + assignee.length * fontSize * 0.56 + itemGap;
-    if (usedWidth && usedWidth + width > availableWidth) {
-      rows.push([]);
-      usedWidth = 0;
-    }
-    rows[rows.length - 1].push({ assignee, width, markerWidth, markerGap });
-    usedWidth += width;
-  });
+function packLegendRows_(assignees, availableWidth, rowCount) {
+  const rows = [];
+  const itemsPerRow = Math.ceil(assignees.length / rowCount);
+  for (let start = 0; start < assignees.length; start += itemsPerRow) {
+    const rowAssignees = assignees.slice(start, start + itemsPerRow);
+    const itemWidth = availableWidth / rowAssignees.length;
+    rows.push(rowAssignees.map((assignee) => {
+      const markerWidth = 10;
+      const markerGap = 4;
+      const textWidth = Math.max(1, itemWidth - markerWidth - markerGap - 5);
+      return {
+        key: assignee.key,
+        displayLabel: truncateTaskTitleToWidth_(assignee.label, textWidth, PDF_CALENDAR.LEGEND_FONT_SIZE),
+        width: itemWidth,
+        markerWidth,
+        markerGap
+      };
+    }));
+  }
   return rows;
 }
 
@@ -750,15 +760,16 @@ function drawAssigneeLegend_(slide, assignees, colorMap, left, top, width, layou
   if (!assignees.length) return;
   layout.rows.forEach((row, rowIndex) => {
     const rowWidth = row.reduce((total, item) => total + item.width, 0);
-    let x = left + Math.max(0, (width - rowWidth) / 2);
-    const y = top + rowIndex * (layout.fontSize + 5) + 2;
+    let x = left + (width - rowWidth) / 2;
+    const y = top + rowIndex * PDF_CALENDAR.LEGEND_ROW_HEIGHT + 2;
     row.forEach((item) => {
-      const lineY = y + layout.fontSize * 0.65;
+      const lineY = y + 5;
       insertSlideLine_(slide, x, lineY, x + item.markerWidth, lineY,
-        colorMap[item.assignee], Math.max(0.2, layout.fontSize * 0.2));
+        colorMap[item.key] || PDF_CALENDAR.NEUTRAL_COLOR, PDF_CALENDAR.TASK_UNDERLINE_WEIGHT);
       const textLeft = x + item.markerWidth + item.markerGap;
-      insertSlideText_(slide, item.assignee, textLeft, y, item.width - item.markerWidth - item.markerGap,
-        layout.fontSize + 3, layout.fontSize, false, SlidesApp.ParagraphAlignment.START);
+      insertSlideText_(slide, noWrapText_(item.displayLabel), textLeft, y,
+        item.width - item.markerWidth - item.markerGap - 3, 9,
+        layout.fontSize, false, SlidesApp.ParagraphAlignment.START);
       x += item.width;
     });
   });
@@ -771,7 +782,7 @@ function drawCalendarGrid_(slide, entriesByDay, colorMap, firstWeekday, daysInMo
     const x = left + column * dayWidth;
     insertSlideRectangle_(slide, x, top, dayWidth, headerHeight, '#F3F4F6', '#CBD5E1');
     insertSlideText_(slide, weekday, x + 2, top + 2, dayWidth - 4, headerHeight - 4,
-      8, true, SlidesApp.ParagraphAlignment.CENTER);
+      PDF_CALENDAR.WEEKDAY_FONT_SIZE, true, SlidesApp.ParagraphAlignment.CENTER);
   });
 
   for (let week = 0; week < numberOfWeeks; week += 1) {
@@ -788,24 +799,71 @@ function drawCalendarGrid_(slide, entriesByDay, colorMap, firstWeekday, daysInMo
 }
 
 function drawCalendarDay_(slide, day, tasks, colorMap, left, top, width, height, fontSize) {
-  const padding = Math.max(1.5, Math.min(3, fontSize * 0.45));
-  const dayNumberHeight = Math.max(9, fontSize + 3);
+  const padding = PDF_CALENDAR.CELL_PADDING;
+  const dayNumberHeight = PDF_CALENDAR.DAY_NUMBER_HEIGHT;
   insertSlideText_(slide, String(day), left + padding, top + 1, width - padding * 2,
-    dayNumberHeight, Math.max(7, fontSize + 1.5), true, SlidesApp.ParagraphAlignment.START);
+    dayNumberHeight, PDF_CALENDAR.DAY_NUMBER_FONT_SIZE, true, SlidesApp.ParagraphAlignment.START);
 
-  const contentWidth = width - padding * 2;
-  let taskTop = top + dayNumberHeight;
-  tasks.forEach((task) => {
-    const lineCount = estimateWrappedLines_(task.title, fontSize, contentWidth);
-    const textHeight = lineCount * fontSize * 1.15;
-    insertSlideText_(slide, task.title, left + padding, taskTop, contentWidth,
-      textHeight, fontSize, false, SlidesApp.ParagraphAlignment.START);
-    const underlineY = taskTop + textHeight + Math.max(0.05, fontSize * 0.08);
-    const underlineWidth = Math.min(contentWidth, Math.max(1, task.title.length * fontSize * 0.46));
-    insertSlideLine_(slide, left + padding, underlineY, left + padding + underlineWidth,
-      underlineY, colorMap[task.assignee] || '#777777', Math.max(0.2, fontSize * 0.14));
-    taskTop = underlineY + Math.max(0.08, fontSize * 0.28);
+  const layout = calculateDayTaskLayout_(tasks.length, width, height);
+  tasks.forEach((task, index) => {
+    const column = Math.floor(index / layout.maxRows);
+    const row = index % layout.maxRows;
+    const taskLeft = left + padding + column * (layout.columnWidth + layout.columnGap);
+    const taskTop = top + dayNumberHeight + row * layout.taskRowHeight;
+    const displayTitle = truncateTaskTitleToWidth_(task.title, layout.columnWidth, fontSize);
+    insertSlideText_(slide, noWrapText_(displayTitle), taskLeft, taskTop, layout.columnWidth,
+      PDF_CALENDAR.TASK_TEXT_HEIGHT, fontSize, false, SlidesApp.ParagraphAlignment.START);
+    const underlineY = taskTop + PDF_CALENDAR.TASK_TEXT_HEIGHT + PDF_CALENDAR.TASK_UNDERLINE_GAP;
+    const underlineWidth = Math.min(layout.columnWidth,
+      Math.max(1, estimateSingleLineTextWidth_(displayTitle, fontSize)));
+    insertSlideLine_(slide, taskLeft, underlineY, taskLeft + underlineWidth, underlineY,
+      colorMap[task.assigneeKey || normalizeAssigneeKey_(task.assignee)] || PDF_CALENDAR.NEUTRAL_COLOR,
+      PDF_CALENDAR.TASK_UNDERLINE_WEIGHT);
   });
+}
+
+function calculateDayTaskLayout_(taskCount, cellWidth, cellHeight) {
+  const contentWidth = Math.max(1, cellWidth - PDF_CALENDAR.CELL_PADDING * 2);
+  const taskRowHeight = PDF_CALENDAR.TASK_TEXT_HEIGHT + PDF_CALENDAR.TASK_UNDERLINE_GAP +
+    PDF_CALENDAR.TASK_ROW_GAP;
+  const availableTaskHeight = Math.max(taskRowHeight,
+    cellHeight - PDF_CALENDAR.DAY_NUMBER_HEIGHT - PDF_CALENDAR.CELL_PADDING);
+  const maxRows = Math.max(1, Math.floor(availableTaskHeight / taskRowHeight));
+  const internalColumns = Math.max(1, Math.ceil(taskCount / maxRows));
+  const columnGap = internalColumns > 1 ? Math.min(1.5, contentWidth / (internalColumns * 4)) : 0;
+  const columnWidth = Math.max(1,
+    (contentWidth - columnGap * (internalColumns - 1)) / internalColumns);
+  return { maxRows, internalColumns, columnGap, columnWidth, taskRowHeight, availableTaskHeight };
+}
+
+function truncateTaskTitleToWidth_(text, availableWidth, fontSize) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized || estimateSingleLineTextWidth_(normalized, fontSize) <= availableWidth) return normalized;
+  const ellipsis = '…';
+  if (estimateSingleLineTextWidth_(ellipsis, fontSize) > availableWidth) return ellipsis;
+  let low = 0;
+  let high = normalized.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const candidate = normalized.slice(0, middle).trimEnd() + ellipsis;
+    if (estimateSingleLineTextWidth_(candidate, fontSize) <= availableWidth) low = middle;
+    else high = middle - 1;
+  }
+  return normalized.slice(0, low).trimEnd() + ellipsis;
+}
+
+function estimateSingleLineTextWidth_(text, fontSize) {
+  return Array.from(String(text || '')).reduce((width, character) => {
+    if (/\s/.test(character)) return width + fontSize * 0.28;
+    if (/[ilI1\.,'`]/.test(character)) return width + fontSize * 0.26;
+    if (/[MW@%]/.test(character)) return width + fontSize * 0.82;
+    if (/[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]/.test(character)) return width + fontSize * 0.61;
+    return width + fontSize * 0.52;
+  }, 0);
+}
+
+function noWrapText_(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().replace(/ /g, '\u00A0');
 }
 
 function insertSlideRectangle_(slide, left, top, width, height, fillColor, borderColor) {

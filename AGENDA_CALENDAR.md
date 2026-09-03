@@ -122,6 +122,9 @@ que o PDF é criado, inclusive se a renderização ou a conversão falhar.
 
 No PDF, a quarta coluna de `TAREFAS` é tratada como responsável. Cada responsável
 recebe uma cor consistente na legenda e no sublinhado de suas tarefas. Linhas sem
-responsável usam o marcador neutro **SEM RESPONSÁVEL**. O tamanho da fonte é calculado
-de acordo com a quantidade de tarefas, o tamanho dos títulos, a célula mais carregada
-e o número de semanas, sem remover ou abreviar tarefas.
+responsável usam o marcador neutro **SEM RESPONSÁVEL**. As tarefas usam fonte fixa de
+8,5 pontos e uma única linha: títulos longos são abreviados visualmente com reticências,
+sem alterar os dados originais. Dias muito carregados são divididos em subcolunas para
+que cada tarefa continue representada sem reduzir a fonte do restante do calendário.
+As cores são derivadas do nome normalizado do responsável, com resolução de colisões
+entre as pessoas presentes no mesmo PDF.
