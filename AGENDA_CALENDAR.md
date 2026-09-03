@@ -115,5 +115,13 @@ que devam ser preservados. O usuário que executar o comando precisa ter permiss
 para alterar eventos nessa agenda; ele não precisa ser proprietário da planilha.
 
 Os PDFs são armazenados na pasta **Calendários de tarefas**, criada na raiz do
-Google Drive quando necessário. O documento temporário usado na conversão é enviado
-à lixeira depois que o PDF é criado.
+Google Drive quando necessário. O calendário é desenhado em uma apresentação com
+exatamente um slide de dimensões fixas; por isso, o PDF resultante possui exatamente
+uma página. A apresentação temporária usada na conversão é enviada à lixeira depois
+que o PDF é criado, inclusive se a renderização ou a conversão falhar.
+
+No PDF, a quarta coluna de `TAREFAS` é tratada como responsável. Cada responsável
+recebe uma cor consistente na legenda e no sublinhado de suas tarefas. Linhas sem
+responsável usam o marcador neutro **SEM RESPONSÁVEL**. O tamanho da fonte é calculado
+de acordo com a quantidade de tarefas, o tamanho dos títulos, a célula mais carregada
+e o número de semanas, sem remover ou abreviar tarefas.
