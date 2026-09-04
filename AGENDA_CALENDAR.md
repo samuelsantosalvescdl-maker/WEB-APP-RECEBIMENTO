@@ -124,8 +124,8 @@ possui exatamente uma página. A cópia temporária usada na conversão é envia
 lixeira depois que o PDF é criado, inclusive se a renderização ou a conversão falhar.
 
 No PDF, a quarta coluna de `TAREFAS` é tratada como responsável. Cada responsável
-recebe uma cor consistente na legenda e no sublinhado de suas tarefas. Linhas sem
-responsável usam o marcador neutro **SEM RESPONSÁVEL**. As tarefas usam fonte fixa de
+recebe uma cor consistente no realce claro aplicado atrás do texto das tarefas e da
+legenda. Linhas sem responsável usam o marcador neutro **SEM RESPONSÁVEL**. As tarefas usam fonte fixa de
 8 pontos e uma única linha: títulos longos são abreviados visualmente com reticências,
 sem alterar os dados originais. Cada dia possui uma única coluna com no máximo dez
 linhas visuais. Quando houver mais de dez tarefas, são mostradas as nove primeiras e
@@ -133,3 +133,8 @@ a última linha informa `+N tarefas`. O template é rejeitado com um erro detalh
 não tiver altura suficiente para as dez linhas, sem reduzir automaticamente a fonte.
 As cores são derivadas do nome normalizado do responsável, com resolução de colisões
 entre as pessoas presentes no mesmo PDF.
+
+Durante a geração, uma amostra limitada registra nos logs a linha de origem, o título
+original, o título visualmente truncado, os comprimentos e o responsável. Títulos que
+começam com `SLIMPEZA` são registrados explicitamente como contendo o caractere extra
+na própria fonte de dados; o gerador não faz correções ortográficas silenciosas.
